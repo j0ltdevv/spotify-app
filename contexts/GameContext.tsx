@@ -1,10 +1,25 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, GAME_CONFIG } from '../constants';
-import { PlayerScores } from '../types';
-import { useAuth } from './AuthContext'; // Import useAuth
-import { getFirestore, doc, setDoc, getDoc, deleteDoc } from 'firebase/firestore'; // Import Firestore modules
-import { app } from '../services/FirebaseService'; // Import the Firebase app
+import { PlayerScores, Player } from '../types';
+import { useAuth } from './AuthContext';
+import { 
+  getFirestore, 
+  doc, 
+  setDoc, 
+  getDoc, 
+  deleteDoc, 
+  onSnapshot, 
+  collection, 
+  query, 
+  where, 
+  getDocs, 
+  updateDoc, 
+  arrayUnion, 
+  arrayRemove 
+} from 'firebase/firestore'; 
+import { app } from '../services/FirebaseService';
+import UserService from '../services/UserService'; // To get user profile info
 
 interface GameState {
   currentRound: number;
@@ -13,7 +28,12 @@ interface GameState {
   category: string;
   gameId: number | null;
   isGameActive: boolean;
-  userId?: string; // Add userId to GameState
+  userId?: string; 
+  // Multiplayer fields
+  roomCode?: string;
+  hostId?: string;
+  players: Player[];
+  status: 'waiting' | 'playing' | 'finished';
 }
 
 interface GameContextType extends GameState {
@@ -21,24 +41,29 @@ interface GameContextType extends GameState {
   nextRound: () => void;
   updatePlayerScore: (playerId: string, score: number) => void;
   addPlayedTrack: (trackId: string) => void;
-  resetGame: () => void;
+  resetGame: () => Promise<void>;
   saveGameState: () => Promise<void>;
   loadGameState: () => Promise<void>;
+  // Multiplayer methods
+  createGame: () => Promise<string>; // Returns room code
+  joinGame: (code: string) => Promise<boolean>;
+  leaveGame: () => Promise<void>;
+  isHost: boolean;
+  activeGameDocId: string | null;
 }
 
 const initialGameState: GameState = {
   currentRound: 1,
-  playerScores: {
-    '1': 0,
-    '2': 0,
-    '3': 0,
-    '4': 0,
-  },
+  playerScores: {},
   playedTracks: [],
   category: 'TOP_RECENT',
   gameId: null,
   isGameActive: false,
   userId: undefined,
+  roomCode: undefined,
+  hostId: undefined,
+  players: [],
+  status: 'waiting',
 };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -48,168 +73,258 @@ const db = getFirestore(app);
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [gameState, setGameState] = useState<GameState>(initialGameState);
-  const { firebaseUser, isLoading: isAuthLoading } = useAuth(); // Get firebaseUser from AuthContext
+  const { firebaseUser, isLoading: isAuthLoading, accessToken } = useAuth();
+  
+  // Track which document we are listening to (Host UID)
+  const [activeGameDocId, setActiveGameDocId] = useState<string | null>(null);
 
-  // Charger l'état du jeu au démarrage et quand l'utilisateur Firebase change
+  // Helper: Generate 4-digit code
+  const generateRoomCode = () => {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+  };
+
+  // 1. LISTENER: Listen to the active game document (Host or Joined)
   useEffect(() => {
-    if (!isAuthLoading && firebaseUser) {
-      loadGameState();
-      // Setup Firestore real-time listener
-      const gameDocRef = doc(db, 'games', firebaseUser.uid);
-      const unsubscribe = onSnapshot(gameDocRef, (docSnap) => {
+    let unsubscribe: () => void;
+
+    if (!isAuthLoading && activeGameDocId) {
+      console.log(`🎧 Start listening to game: ${activeGameDocId}`);
+      const gameDocRef = doc(db, 'games', activeGameDocId);
+      
+      unsubscribe = onSnapshot(gameDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const firestoreState = docSnap.data() as GameState;
-          // Only update if the state coming from Firestore is different from current local state
-          // This helps avoid unnecessary re-renders and potential loops
-          if (JSON.stringify(firestoreState) !== JSON.stringify(gameState)) {
-            setGameState(firestoreState);
-            console.log('🔄 État du jeu mis à jour en temps réel depuis Firestore');
-          }
+          
+          // Basic sync: Update local state from Firestore
+          // We intentionally overwrite local state to keep everyone in sync
+          setGameState(prevState => {
+             if (JSON.stringify(prevState) !== JSON.stringify(firestoreState)) {
+                 console.log('🔄 Game State Synced from Firestore');
+                 return firestoreState;
+             }
+             return prevState;
+          });
+
         } else {
-          console.log('ℹ️ Le document de jeu Firestore n\'existe plus, réinitialisation locale.');
+          console.log('⚠️ Game document deleted. Resetting.');
           setGameState(initialGameState);
+          setActiveGameDocId(null);
         }
       }, (error) => {
-        console.error('❌ Erreur d\'écoute Firestore:', error);
+        console.error('❌ Firestore listener error:', error);
       });
-
-      // Cleanup listener on unmount or user change
-      return () => {
-        unsubscribe();
-        console.log('🔌 Listener Firestore déconnecté.');
-      };
-    } else if (!isAuthLoading && !firebaseUser) {
-      // Si l'utilisateur se déconnecte, réinitialiser le jeu localement
-      setGameState(initialGameState);
     }
-  }, [firebaseUser, isAuthLoading]); // Added gameState to dependencies to prevent infinite loop
 
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+        console.log('🔌 Listener disconnected');
+      }
+    };
+  }, [activeGameDocId, isAuthLoading]);
 
-  const startNewGame = (category: string) => {
-    const newState: GameState = {
+  // 2. CREATE GAME (HOST)
+  const createGame = async (): Promise<string> => {
+    if (!firebaseUser) throw new Error("Must be logged in");
+
+    const code = generateRoomCode();
+    
+    // Get Host Profile
+    let hostName = "Hôte";
+    let hostImage = undefined;
+    
+    // Try to get cached profile or fetch if possible
+    if (accessToken) {
+       const userProfile = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
+       if (userProfile.success && userProfile.user) {
+           hostName = userProfile.user.display_name;
+           hostImage = userProfile.user.images?.[0]?.url;
+       }
+    }
+
+    const hostPlayer: Player = {
+        id: firebaseUser.uid,
+        name: hostName,
+        image: hostImage || undefined, // undefined is problematic for Firestore if not ignored, let's use null or omit if strict
+        color: '#1DB954', // Spotify Green
+        emoji: '👑'
+    };
+
+    // Firestore clean object
+    const cleanHostPlayer = JSON.parse(JSON.stringify(hostPlayer));
+
+    const newGame: GameState = {
       ...initialGameState,
-      category,
       gameId: Date.now(),
       isGameActive: true,
-      userId: firebaseUser?.uid, // Assurez-vous que l'userId est défini lors de la création
+      userId: firebaseUser.uid,
+      roomCode: code,
+      hostId: firebaseUser.uid,
+      players: [cleanHostPlayer],
+      status: 'waiting',
+      playerScores: { [firebaseUser.uid]: 0 }
     };
-    setGameState(newState);
-    saveGameStateToStorage(newState);
-    console.log('🎮 Nouvelle partie démarrée:', category);
+
+    // Save to Firestore (Doc ID = Host UID)
+    await setDoc(doc(db, 'games', firebaseUser.uid), newGame);
+    
+    setGameState(newGame);
+    setActiveGameDocId(firebaseUser.uid);
+    console.log(`✅ Game Created. Code: ${code}`);
+    return code;
+  };
+
+  // 3. JOIN GAME (GUEST)
+  const joinGame = async (code: string): Promise<boolean> => {
+    if (!firebaseUser) return false;
+
+    console.log(`🔍 Searching for room: ${code}`);
+    const q = query(collection(db, 'games'), where("roomCode", "==", code));
+    const querySnapshot = await getDocs(q);
+
+    if (querySnapshot.empty) {
+      console.warn("❌ Room not found");
+      return false;
+    }
+
+    const gameDoc = querySnapshot.docs[0];
+    const gameData = gameDoc.data() as GameState;
+    const hostUid = gameDoc.id;
+
+    // Check if already in
+    const isAlreadyJoined = gameData.players.some(p => p.id === firebaseUser.uid);
+
+    if (!isAlreadyJoined) {
+        // Get Guest Profile
+        let guestName = "Invité";
+        let guestImage = undefined;
+        if (accessToken) {
+             const userProfile = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
+             if (userProfile.success && userProfile.user) {
+                 guestName = userProfile.user.display_name;
+                 guestImage = userProfile.user.images?.[0]?.url;
+             }
+        }
+
+        const newPlayer: Player = {
+            id: firebaseUser.uid,
+            name: guestName,
+            image: guestImage,
+            color: '#'+(Math.random()*0xFFFFFF<<0).toString(16).padStart(6, '0'), // Random color
+            emoji: '👋'
+        };
+
+        // Clean for Firestore
+        const cleanNewPlayer = JSON.parse(JSON.stringify(newPlayer));
+
+        // Add self to players list in Firestore
+        await updateDoc(doc(db, 'games', hostUid), {
+            players: arrayUnion(cleanNewPlayer),
+            [`playerScores.${firebaseUser.uid}`]: 0 // Initialize score
+        });
+        console.log("✅ Joined game document");
+    } else {
+        console.log("ℹ️ Already in this game");
+    }
+
+    // Switch listener to Host's ID
+    setActiveGameDocId(hostUid);
+    return true;
+  };
+
+  // 4. LEAVE GAME
+  const leaveGame = async () => {
+    if (!firebaseUser || !activeGameDocId) return;
+
+    if (activeGameDocId === firebaseUser.uid) {
+        // I am Host -> End game? Or just reset?
+        // For now, delete game
+        await deleteDoc(doc(db, 'games', firebaseUser.uid));
+        setActiveGameDocId(null);
+        setGameState(initialGameState);
+    } else {
+        // I am Guest -> Remove myself
+        const playerToRemove = gameState.players.find(p => p.id === firebaseUser.uid);
+        if (playerToRemove) {
+            await updateDoc(doc(db, 'games', activeGameDocId), {
+                players: arrayRemove(playerToRemove)
+            });
+        }
+        setActiveGameDocId(null);
+        setGameState(initialGameState);
+    }
+  };
+
+  // Legacy methods wrappers (Host only usually, but updated for sync)
+  const startNewGame = (category: string) => {
+    if (firebaseUser?.uid !== gameState.hostId) return; // Only host
+    const updates = {
+      category,
+      isGameActive: true,
+      status: 'playing',
+      currentRound: 1,
+      gameId: Date.now()
+    };
+    // Optimistic update
+    setGameState(prev => ({ ...prev, ...updates } as GameState)); 
+    // Firestore update
+    if (activeGameDocId) {
+        updateDoc(doc(db, 'games', activeGameDocId), updates);
+    }
   };
 
   const nextRound = () => {
+    if (firebaseUser?.uid !== gameState.hostId) return; // Only host
     if (gameState.currentRound >= GAME_CONFIG.MAX_ROUNDS) {
-      // Fin de partie
-      setGameState(prev => ({ ...prev, isGameActive: false }));
-      return;
+         updateDoc(doc(db, 'games', activeGameDocId!), { isGameActive: false, status: 'finished' });
+         return;
     }
-
-    setGameState(prev => {
-      const newState = { ...prev, currentRound: prev.currentRound + 1 };
-      saveGameStateToStorage(newState);
-      return newState;
-    });
-    console.log('➡️ Manche suivante:', gameState.currentRound + 1);
+    const updates = { currentRound: gameState.currentRound + 1 };
+    updateDoc(doc(db, 'games', activeGameDocId!), updates);
   };
 
   const updatePlayerScore = (playerId: string, score: number) => {
-    setGameState(prev => {
-      const newState = {
-        ...prev,
-        playerScores: {
-          ...prev.playerScores,
-          [playerId]: (prev.playerScores[playerId] || 0) + score,
-        },
-      };
-      saveGameStateToStorage(newState);
-      return newState;
-    });
-    console.log(`📊 Score mis à jour pour joueur ${playerId}: +${score}`);
+    // Anyone can update their own score, or host updates all?
+    // Usually game logic: verifying answer. 
+    // Let's assume this is called when a player answers correctly.
+    // If it's *my* score, I update it.
+    
+    // Calculate new score locally first for speed
+    const currentScore = gameState.playerScores[playerId] || 0;
+    const newScore = currentScore + score;
+    
+    if (activeGameDocId) {
+        updateDoc(doc(db, 'games', activeGameDocId), {
+            [`playerScores.${playerId}`]: newScore
+        });
+    }
   };
 
   const addPlayedTrack = (trackId: string) => {
-    setGameState(prev => {
-      const newState = {
-        ...prev,
-        playedTracks: [...prev.playedTracks, trackId],
-      };
-      saveGameStateToStorage(newState);
-      return newState;
-    });
-  };
-
-  const resetGame = async () => { // Make async
-    setGameState(initialGameState);
-    if (!firebaseUser) {
-      console.warn('⚠️ Impossible de réinitialiser: aucun utilisateur Firebase connecté.');
-      return;
-    }
-    try {
-      const gameDocRef = doc(db, 'games', firebaseUser.uid);
-      await deleteDoc(gameDocRef);
-      console.log('🔄 Jeu réinitialisé et supprimé de Firestore');
-    } catch (error) {
-      console.error('❌ Erreur lors de la suppression du jeu sur Firestore:', error);
+    if (firebaseUser?.uid !== gameState.hostId) return;
+    if (activeGameDocId) {
+        updateDoc(doc(db, 'games', activeGameDocId), {
+            playedTracks: arrayUnion(trackId)
+        });
     }
   };
 
-  const saveGameStateToStorage = async (state: GameState) => {
-    if (!firebaseUser) {
-      console.warn('⚠️ Impossible de sauvegarder: aucun utilisateur Firebase connecté.');
-      return;
-    }
-    try {
-      // Utilisez l'UID de l'utilisateur comme ID de document pour sauvegarder son état de jeu unique
-      const gameDocRef = doc(db, 'games', firebaseUser.uid);
-      await setDoc(gameDocRef, { ...state, userId: firebaseUser.uid }, { merge: true }); // Merge pour mettre à jour partiellement
-      console.log('✅ État du jeu sauvegardé sur Firestore pour l\'utilisateur:', firebaseUser.uid);
-    } catch (error) {
-      console.error('❌ Erreur sauvegarde état du jeu sur Firestore:', error);
-    }
+  const resetGame = async () => {
+     await leaveGame();
   };
 
-  const saveGameState = async () => {
-    await saveGameStateToStorage(gameState);
-  };
-
-  const loadGameState = async () => {
-    if (!firebaseUser) {
-      console.warn('⚠️ Impossible de charger: aucun utilisateur Firebase connecté.');
-      return;
-    }
-    try {
-      const gameDocRef = doc(db, 'games', firebaseUser.uid);
-      const gameDoc = await getDoc(gameDocRef);
-
-      if (gameDoc.exists()) {
-        const loadedState = gameDoc.data() as GameState;
-        // Ne charger que si le jeu était actif et pas trop ancien (moins de 24h)
-        if (loadedState.isGameActive && loadedState.gameId) {
-          const gameAge = Date.now() - loadedState.gameId;
-          const oneDayInMs = 24 * 60 * 60 * 1000;
-          
-          if (gameAge < oneDayInMs) {
-            setGameState(loadedState);
-            console.log('✅ État du jeu restauré depuis Firestore');
-          } else {
-            console.log('⚠️ Partie trop ancienne sur Firestore, réinitialisation');
-            await deleteDoc(gameDocRef); // Supprimer l'ancienne partie
-            setGameState(initialGameState); // Réinitialiser l'état local
+  const saveGameState = async () => { /* No-op now, handled by updates */ };
+  const loadGameState = async () => { 
+      // Check if we have an active game in memory/cache? 
+      // For now, rely on create/join to set activeGameDocId
+      // Potential improvement: Check Firestore if I'm already hosting
+      if (firebaseUser) {
+          const docSnap = await getDoc(doc(db, 'games', firebaseUser.uid));
+          if (docSnap.exists()) {
+             // I was hosting a game
+             setActiveGameDocId(firebaseUser.uid);
           }
-        } else {
-          // Si le document existe mais que le jeu n'est pas actif, le supprimer
-          await deleteDoc(gameDocRef);
-          setGameState(initialGameState);
-        }
-      } else {
-        console.log('ℹ️ Aucun état de jeu trouvé sur Firestore pour l\'utilisateur:', firebaseUser.uid);
-        setGameState(initialGameState); // S'assurer que l'état local est initial
       }
-    } catch (error) {
-      console.error('❌ Erreur chargement état du jeu depuis Firestore:', error);
-      setGameState(initialGameState); // En cas d'erreur, revenir à l'état initial
-    }
   };
 
   const value: GameContextType = {
@@ -221,6 +336,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     resetGame,
     saveGameState,
     loadGameState,
+    createGame,
+    joinGame,
+    leaveGame,
+    isHost: firebaseUser?.uid === gameState.hostId,
+    activeGameDocId
   };
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>;

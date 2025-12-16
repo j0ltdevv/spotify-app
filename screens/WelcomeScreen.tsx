@@ -52,13 +52,13 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
     discovery
   );
 
-  // Redirection automatique si déjà connecté
+  // Redirection automatique si déjà connecté (Désactivé pour tests)
   useEffect(() => {
-    if (!isLoading && accessToken) {
-      Logger.auth.success('Auto-login');
-      Logger.nav('Lobby', { auto: true });
-      navigation.replace('Lobby', {});
-    }
+    // if (!isLoading && accessToken) {
+    //   Logger.auth.success('Auto-login');
+    //   Logger.nav('Menu', { auto: true });
+    //   navigation.replace('Menu');
+    // }
   }, [isLoading, accessToken, navigation]);
 
   useEffect(() => {
@@ -111,8 +111,8 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
           Logger.debug('Spotify Auth: Access token set via Firebase login');
           showToast('Connexion réussie !', 'success', 2000);
           setTimeout(() => {
-            Logger.nav('Lobby');
-            navigation.replace('Lobby', {});
+            Logger.nav('Menu');
+            navigation.replace('Menu');
           }, 500);
         } catch (firebaseError) {
           Logger.auth.error('Erreur authentification Firebase avec Spotify', firebaseError);

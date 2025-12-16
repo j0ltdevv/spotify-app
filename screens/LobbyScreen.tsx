@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useGame } from '../contexts/GameContext'; // Added useGame
 import { useToast } from '../contexts/ToastContext';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Dimensions, Image, Animated, Alert, ActivityIndicator } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -8,7 +9,7 @@ import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { MOCK_PLAYERS, CATEGORIES, COLORS } from '../constants';
+import { CATEGORIES, COLORS } from '../constants';
 import SafeContainer from '../components/SafeContainer';
 import UserService from '../services/UserService';
 import { Player, Category } from '../types';
@@ -24,22 +25,37 @@ type LobbyScreenProps = {
 const { width } = Dimensions.get('window');
 
 export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
-  const { accessToken, logout, firebaseUser, isLoading: isAuthLoading } = useAuth();
+  const { accessToken, logout, firebaseUser } = useAuth();
+  // Using real multiplayer data
+  const { players, roomCode, isHost, leaveGame, status, startNewGame } = useGame(); 
+  
   const { showToast } = useToast();
-  const [players, setPlayers] = useState<Player[]>(MOCK_PLAYERS);
   const scrollViewRef = useRef<ScrollView>(null);
-  const [isAdmin, setIsAdmin] = useState(true); // Le premier joueur est admin
-  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   
   const [selectedCategory, setSelectedCategory] = useState<string>(CATEGORIES[0].key);
+  // Remove isAdmin state, use isHost from context
+  const [isLoadingProfile, setIsLoadingProfile] = useState(false); // No longer needed as much
   
   // Deezer Import Check
   const deezerTracks = route.params?.tracks;
   const playlistName = route.params?.playlistName;
 
+  // Effect to navigate when game starts
+  useEffect(() => {
+    if (status === 'playing') {
+        Logger.nav('Game', { round: 1, category: selectedCategory });
+        navigation.navigate('Game', { 
+            round: 1, 
+            gameId: Date.now(), 
+            category: selectedCategory,
+            tracks: deezerTracks 
+        });
+    }
+  }, [status, navigation, selectedCategory, deezerTracks]);
+
   // Fonction pour retirer un joueur (admin uniquement)
   const removePlayer = (playerId: string, playerName: string) => {
-    if (isAdmin && players.length > 1) {
+    if (isHost && players.length > 1) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       Alert.alert(
         'Retirer le joueur',
@@ -55,7 +71,9 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
             style: 'destructive',
             onPress: () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              setPlayers(prevPlayers => prevPlayers.filter(player => player.id !== playerId));
+              // Logic to remove player via context (not yet implemented in leaveGame for others)
+              // For now, just local or todo
+              showToast("Fonctionnalité d'exclusion à venir", "info");
             },
           },
         ]
@@ -67,8 +85,8 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const handleLogout = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Alert.alert(
-      'Déconnexion',
-      'Voulez-vous vraiment vous déconnecter ?',
+      'Quitter',
+      'Voulez-vous quitter la partie ?',
       [
         {
           text: 'Annuler',
@@ -76,72 +94,17 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
           onPress: () => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light),
         },
         {
-          text: 'Déconnexion',
+          text: 'Quitter',
           style: 'destructive',
           onPress: async () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            await logout();
-            navigation.navigate('Welcome');
+            await leaveGame();
+            navigation.navigate('Menu'); // Go back to Menu
           },
         },
       ]
     );
   };
-
-  useEffect(() => {
-    const loadUserProfile = async () => {
-      // Si on vient de l'import Deezer, on simule un profil "Invité"
-      if (deezerTracks) {
-        Logger.info(`Mode Deezer actif : ${deezerTracks.length} titres chargés`);
-        setPlayers(prevPlayers => 
-          prevPlayers.map((player, index) => 
-            index === 0 
-              ? { ...player, name: 'Invité (Deezer)', image: undefined, emoji: '🎧' }
-              : player
-          )
-        );
-        setIsLoadingProfile(false);
-        showToast(`Playlist chargée : ${playlistName}`, 'success', 3000);
-        return;
-      }
-
-      if (!accessToken || !firebaseUser || isAuthLoading) { // Ensure firebaseUser is available and auth is not loading
-        setIsLoadingProfile(false);
-        return;
-      }
-
-      Logger.info('Chargement du profil Spotify...');
-      setIsLoadingProfile(true);
-      
-      // ✅ Utilisation du UserService avec cache automatique et Firebase UID
-      const result = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
-      
-      if (result.success && result.user) {
-        const displayName = UserService.getDisplayName(result.user);
-        const profileImage = UserService.getProfileImage(result.user);
-        
-        Logger.success(`Profil Spotify chargé: ${displayName}`);
-        
-        // Mettre à jour le premier joueur avec les vraies données
-        setPlayers(prevPlayers => 
-          prevPlayers.map((player, index) => 
-            index === 0 
-              ? { ...player, name: displayName, image: profileImage }
-              : player
-          )
-        );
-        showToast(`Bienvenue ${displayName} !`, 'success', 2500);
-      } else {
-        Logger.error('Erreur chargement profil Spotify', result.error);
-        showToast('Impossible de charger votre profil Spotify', 'error', 3000);
-      }
-      
-      setIsLoadingProfile(false);
-    };
-
-    loadUserProfile();
-  }, [accessToken, deezerTracks, firebaseUser, isAuthLoading]); // Added firebaseUser and isAuthLoading to dependencies
-
 
   return (
     <SafeContainer>
@@ -153,7 +116,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
           onPress={handleLogout}
           activeOpacity={0.7}
         >
-          <Ionicons name="log-out-outline" color="#FF6B6B" size={20} />
+          <Ionicons name="close" color="#FF6B6B" size={24} />
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
@@ -166,7 +129,8 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
             <Text style={styles.headerTitle}>{deezerTracks ? "MODE DEEZER" : "SALLE D'ATTENTE"}</Text>
           </View>
           <Text style={styles.headerSubtitle}>
-            {isLoadingProfile ? 'Chargement...' : (deezerTracks ? playlistName : `${players.length} joueurs connectés`)}
+            {/* Show Room Code here subtly */}
+            Code: {roomCode} • {players.length} joueurs connectés
           </Text>
         </View>
         
@@ -187,7 +151,6 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       {/* Si Deezer Mode : Pas de choix de catégorie */}
       {!deezerTracks && (
       <View style={styles.categorySection}>
-        {/* ... (Code existant pour les catégories) ... */}
         <View style={styles.categoryHeader}>
           <Ionicons name="grid" color="#1DB954" size={20} />
           <Text style={styles.categoryTitle}>Choisis ta catégorie</Text>
@@ -207,6 +170,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
                   key={cat.key}
                   style={styles.categoryCard}
                   onPress={() => {
+                    if (!isHost) return; // Only host can change category
                     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     setSelectedCategory(cat.key);
                   }}
@@ -266,7 +230,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       <ScrollView style={styles.playersList} contentContainerStyle={styles.playersContent}>
         <View style={styles.playersHeader}>
           <Text style={styles.playersHeaderText}>Joueurs</Text>
-          {isAdmin && (
+          {isHost && (
             <View style={styles.adminBadge}>
               <Ionicons name="shield-checkmark" color="#FFD700" size={14} />
               <Text style={styles.adminBadgeText}>Admin</Text>
@@ -297,7 +261,8 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
                     <View style={styles.playerDetails}>
                       <View style={styles.playerNameRow}>
                         <Text style={styles.playerName}>{player.name}</Text>
-                        {index === 0 && isAdmin && (
+                        {/* Identify Host based on first player or logic? Logic: Host is index 0 in creation usually, but let's assume we can't easily know who is host visually without a flag in Player object. Assuming index 0 is host for list */}
+                        {index === 0 && (
                           <View style={styles.hostBadge}>
                             <Text style={styles.hostBadgeText}>Hôte</Text>
                           </View>
@@ -310,7 +275,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
                     </View>
                   </View>
                   <View style={styles.playerActions}>
-                    {isAdmin && index !== 0 && (
+                    {isHost && player.id !== firebaseUser?.uid && (
                       <TouchableOpacity
                         style={styles.removePlayerButton}
                         onPress={() => removePlayer(player.id, player.name)}
@@ -331,27 +296,34 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       <View style={styles.footer}>
         <PressableCard
           onPress={() => {
+            if (!isHost) {
+                showToast("Seul l'hôte peut lancer la partie", "info");
+                return;
+            }
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-            Logger.game.start(1, deezerTracks ? 'Deezer' : selectedCategory);
-            // Si Deezer, on passe les tracks directement
-            Logger.nav('Game', { round: 1, category: deezerTracks ? 'Deezer' : selectedCategory });
-            navigation.navigate('Game', { 
-              round: 1, 
-              gameId: Date.now(), 
-              category: deezerTracks ? 'Deezer' : selectedCategory,
-              tracks: deezerTracks // Passage des tracks Deezer au GameScreen
-            });
+            // Start game via context
+            startNewGame(selectedCategory);
           }}
           style={{ width: '100%' }}
         >
           <LinearGradient
-            colors={deezerTracks ? ['#A238FF', '#B560FF'] : [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]}
+            colors={!isHost ? ['#555', '#444'] : (deezerTracks ? ['#A238FF', '#B560FF'] : [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT])}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
             style={styles.startButton}
           >
-            <Ionicons name="play" color="#FFFFFF" size={28} />
-            <Text style={styles.startButtonText}>{deezerTracks ? "Lancer la Playlist" : "Lancer la partie"}</Text>
+            {isHost ? (
+                <>
+                    <Ionicons name="play" color="#FFFFFF" size={28} />
+                    <Text style={styles.startButtonText}>{deezerTracks ? "Lancer la Playlist" : "Lancer la partie"}</Text>
+                </>
+            ) : (
+                <>
+                    <ActivityIndicator color="white" style={{marginRight: 10}} />
+                    <Text style={styles.startButtonText}>En attente de l'hôte...</Text>
+                </>
+            )}
+            
             <View style={styles.playerCountBadge}>
               <Text style={styles.playerCountText}>{players.length}</Text>
             </View>

@@ -3,10 +3,13 @@ import { app } from './FirebaseService';
 
 let analytics: Analytics | null = null;
 
-try {
-  analytics = getAnalytics(app);
-} catch (error) {
-  console.error("Firebase Analytics initialization failed:", error);
+// Only initialize Analytics in a browser environment
+if (typeof window !== 'undefined' && typeof window.document !== 'undefined') {
+  try {
+    analytics = getAnalytics(app);
+  } catch (error) {
+    console.error("Firebase Analytics initialization failed:", error);
+  }
 }
 
 /**

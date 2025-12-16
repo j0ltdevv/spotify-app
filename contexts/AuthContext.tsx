@@ -2,8 +2,8 @@ import React, { createContext, useState, useContext, ReactNode, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, TOKEN_CONFIG } from '../constants';
 import { isTokenExpired, calculateExpiryTime, validateToken } from '../utils/spotifyRefresh';
-import { getAuth, onAuthStateChanged, User, signInWithCredential, signOut, OAuthProvider } from 'firebase/auth'; // Import Firebase Auth modules
-import { app } from '../services/FirebaseService'; // Import the Firebase app
+import { onAuthStateChanged, User, signInAnonymously, signOut } from 'firebase/auth'; // Import signInAnonymously
+import { app, auth } from '../services/FirebaseService'; // Import the Firebase app and auth instance
 
 // 1. Définition des types pour le contexte
 interface AuthContextType {
@@ -19,9 +19,6 @@ interface AuthContextType {
 
 // 2. Création du contexte
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
-
-// Initialize Firebase Auth
-const auth = getAuth(app);
 
 // 3. Fournisseur du contexte (le wrapper)
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
@@ -123,18 +120,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   }, [logout]);
 
-  // Firebase Spotify Login
+  // Firebase Spotify Login (Via Anonymous Auth for free tier support)
   const loginWithSpotifyFirebase = useCallback(async (spotifyAccessToken: string) => {
     try {
       setIsLoading(true);
-      const provider = new OAuthProvider('spotify.com');
-      const credential = provider.credential({
-        accessToken: spotifyAccessToken,
-      });
-      await signInWithCredential(auth, credential);
-      console.log('✅ Authentifié avec Spotify via Firebase!');
+      // We use Anonymous auth to avoid requiring "Identity Platform" (which needs a credit card)
+      // The Spotify profile data will be linked manually in Firestore using the anonymous User ID
+      await signInAnonymously(auth);
+      console.log('✅ Authentifié anonymement sur Firebase (Plan Gratuit)');
     } catch (error) {
-      console.error('❌ Erreur authentification Spotify via Firebase:', error);
+      console.error('❌ Erreur authentification Firebase:', error);
       throw error;
     } finally {
       setIsLoading(false);

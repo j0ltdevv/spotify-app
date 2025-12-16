@@ -7,6 +7,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { StatusBar } from 'expo-status-bar';
 import WelcomeScreen from './screens/WelcomeScreen';
+import MenuScreen from './screens/MenuScreen'; // Import MenuScreen
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
 import RevealScreen from './screens/RevealScreen';
@@ -15,12 +16,13 @@ import SettingsScreen from './screens/SettingsScreen';
 import ErrorBoundary from './components/ErrorBoundary';
 import SoundManager from './utils/SoundManager';
 import { COLORS } from './constants';
-import { app, analytics } from './services/FirebaseService'; // Import Firebase app and analytics
+import { app } from './services/FirebaseService'; // Import Firebase app
 
 import { GameTrack } from './types';
 
 export type RootStackParamList = {
   Welcome: undefined;
+  Menu: undefined; // Add Menu route
   Lobby: { gameId?: number; tracks?: GameTrack[]; playlistName?: string };
   Game: { gameId?: number; round?: number; playerScores?: any; category?: string; tracks?: GameTrack[] };
   Reveal: { correctPlayer: string; track: any; score: number; round: number; playerScores?: any; selectedPlayer?: string; category?: string };
@@ -59,6 +61,7 @@ export default function App() {
                   }}
                 >
                   <Stack.Screen name="Welcome" component={WelcomeScreen} />
+                  <Stack.Screen name="Menu" component={MenuScreen} /> 
                   <Stack.Screen name="Lobby" component={LobbyScreen} />
                   <Stack.Screen name="Game" component={GameScreen} />
                   <Stack.Screen name="Reveal" component={RevealScreen} />
