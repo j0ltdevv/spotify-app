@@ -1,8 +1,10 @@
 // Configuration de l'application
 // ⚠️ NE PAS COMMITTER CE FICHIER AVEC DES VRAIES CLÉS EN PRODUCTION
 
+import { SPOTIFY_CLIENT_ID } from '@env';
+
 export const SPOTIFY_CONFIG = {
-  CLIENT_ID: '3765c558e9704334bbe1acebe13998fa',
+  CLIENT_ID: SPOTIFY_CLIENT_ID,
   REDIRECT_SCHEME: 'trackroulette',
   SCOPES: [
     'user-read-email',

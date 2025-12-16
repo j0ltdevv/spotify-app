@@ -36,6 +36,13 @@ export const Logger = {
     }
   },
 
+  // Debug générique
+  debug: (message: string, ...args: any[]) => {
+    if (IS_DEV) {
+      console.log(`🐛 ${message}`, ...args);
+    }
+  },
+
   // Debug API
   api: {
     request: (endpoint: string, method: string = 'GET') => {
