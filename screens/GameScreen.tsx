@@ -1,0 +1,821 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Alert, ActivityIndicator } from 'react-native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
+import { RootStackParamList } from '../App';
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
+import { MOCK_PLAYERS, GAME_CONFIG, COLORS } from '../constants';
+import SafeContainer from '../components/SafeContainer';
+import MusicService from '../services/MusicService';
+import SoundManager from '../utils/SoundManager';
+import { GameTrack, PlayerScores } from '../types';
+import CircularTimer from '../components/CircularTimer';
+import AudioVisualizer from '../components/AudioVisualizer';
+import PressableCard from '../components/PressableCard';
+import Logger from '../utils/logger';
+
+type GameScreenProps = {
+  navigation: NativeStackNavigationProp<RootStackParamList, 'Game'>;
+  route: RouteProp<RootStackParamList, 'Game'>;
+};
+
+const { width } = Dimensions.get('window');
+
+export default function GameScreen(props: GameScreenProps) {
+  const { navigation, route } = props;
+  // Récupération des paramètres avec valeurs par défaut
+  const { accessToken: rawAccessToken } = useAuth();
+  const { showToast } = useToast();
+  // Force string pour les appels API
+  const accessToken = rawAccessToken || '';
+  // Typage robuste pour route.params
+  const { gameId, round = 1, category = 'TOP_RECENT', playerScores: initialScores, tracks: localTracks } = (route.params || {}) as { 
+    gameId?: number; 
+    round?: number; 
+    category?: string; 
+    playerScores?: PlayerScores;
+    tracks?: GameTrack[];
+  };
+  
+  const [currentTrack, setCurrentTrack] = useState<GameTrack | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(GAME_CONFIG.INITIAL_TIME);
+  const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  const [pulseAnim] = useState(new Animated.Value(1));
+  const [timerScale] = useState(new Animated.Value(1));
+  const [loading, setLoading] = useState(true);
+  const [playedTracks, setPlayedTracks] = useState<string[]>([]);
+  
+  // Animations indépendantes pour chaque barre du visualizer
+  const barAnims = useRef(
+    Array.from({ length: 20 }, () => new Animated.Value(0.3))
+  ).current;
+  // Stockage global des tracks joués (persiste entre les parties)
+  const playedTracksGlobalRef = useRef<Set<string>>(new Set());
+  // Nouveau : cumul des scores par joueur (récupéré depuis les params ou initialisé)
+  const [playerScores, setPlayerScores] = useState<PlayerScores>(
+    initialScores || {
+      '1': 0,
+      '2': 0,
+      '3': 0,
+      '4': 0,
+    }
+  );
+  
+  const isLoadingRef = useRef(false); // Pour éviter les appels concurrents
+  const expectedTrackRef = useRef<GameTrack | null>(null); // Pour éviter les race conditions
+  const roundIdRef = useRef<string>(''); // Identifiant unique du round en cours
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const isFocusedRef = useRef(true); // Pour savoir si l'écran est visible
+
+  // --- 1. GESTION DU FOCUS DE L'ÉCRAN ---
+  // Empêcher la musique de démarrer si on est sur RevealScreen
+  useFocusEffect(
+    React.useCallback(() => {
+      Logger.info('GameScreen focused');
+      isFocusedRef.current = true;
+      
+      return () => {
+        Logger.info('GameScreen unfocused - Arrêt du son');
+        isFocusedRef.current = false;
+        // Arrêter la musique quand on quitte l'écran
+        SoundManager.stopSound();
+        if (timerRef.current) {
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      };
+    }, [])
+  );
+
+  // --- 2. INITIALISATION ET BOUCLE DE JEU ---
+  useEffect(() => {
+    // Reset played tracks et scores pour nouvelle partie
+    if (round === 1) {
+      setPlayedTracks([]);
+      setPlayerScores({ '1': 0, '2': 0, '3': 0, '4': 0 });
+      
+      // Log du cache global pour debug
+      Logger.game.start(1, category || 'TOP_RECENT');
+      Logger.info(`Nouvelle partie - Cache global: ${playedTracksGlobalRef.current.size} morceaux`);
+    } else if (initialScores) {
+      // Si on a des scores depuis les params, on les utilise
+      setPlayerScores(initialScores);
+    }
+
+    // Vérification de fin de partie
+    if (round > GAME_CONFIG.MAX_ROUNDS) {
+      // Générer les résultats finaux réels avec vérification
+      Logger.info(`Fin de partie - Round ${round} | Scores:`, playerScores);
+      
+      const results = MOCK_PLAYERS.map(player => {
+        const result = {
+          name: player.name || 'Joueur inconnu',
+          score: playerScores[player.id] || 0,
+          avatar: { 
+            color: player.color || '#1DB954', 
+            emoji: player.emoji || '🎵' 
+          }
+        };
+        Logger.info(`Joueur ${player.name}: ${result.score} points`);
+        return result;
+      }).filter(r => r.name); // Filtrer les résultats valides
+      
+      if (results.length === 0) {
+        Logger.error('Aucun résultat généré - Retour au lobby');
+        navigation.replace('Lobby', {});
+        return;
+      }
+      
+      Logger.game.end(results[0]?.score || 0);
+      Logger.nav('GameOver', { totalPlayers: results.length });
+      navigation.replace('GameOver', { results });
+      return;
+    }
+
+    // Reset du timer et du joueur sélectionné pour chaque nouvelle manche
+    Logger.info(`Reset du timer à ${GAME_CONFIG.INITIAL_TIME} secondes`);
+    setTimeLeft(GAME_CONFIG.INITIAL_TIME);
+    setSelectedPlayer(null);
+    setIsPlaying(false);
+
+    // Arrêter tout timer existant avant de démarrer une nouvelle manche
+    if (timerRef.current) {
+      Logger.info('Arrêt du timer existant');
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // ⚠️ IMPORTANT: Ne démarrer le round que si l'écran est focused
+    if (accessToken && isFocusedRef.current) {
+      startRound();
+    }
+    
+    return () => { 
+      // ✅ Utilisation du SoundManager pour le cleanup
+      SoundManager.stopSound();
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [accessToken, gameId, round]);
+
+  const stopSound = async (clearExpectedTrack: boolean = true) => {
+    // ✅ Utilisation du SoundManager
+    await SoundManager.stopSound();
+    
+    if (clearExpectedTrack) {
+      expectedTrackRef.current = null;
+    }
+    
+    setIsPlaying(false);
+  };
+
+  const startRound = async () => {
+    // Éviter les appels concurrents
+    if (isLoadingRef.current) {
+      Logger.warn("Démarrage déjà en cours, on ignore");
+      return;
+    }
+    isLoadingRef.current = true;
+    setLoading(true);
+    
+    // Générer un ID unique pour ce round
+    const currentRoundId = `round-${round}-${Date.now()}`;
+    roundIdRef.current = currentRoundId;
+    
+    // S'assurer qu'aucun son n'est en cours ET réinitialiser expectedTrackRef
+    await stopSound(true);
+    setCurrentTrack(null);
+    expectedTrackRef.current = null;
+    
+    Logger.game.start(round, category || 'TOP_RECENT');
+    Logger.info(`Démarrage de la manche ${round} avec ID: ${currentRoundId}`);
+    try {
+      let tracks: GameTrack[] = [];
+
+      // ✅ LOGIC: Utiliser les tracks locaux (Deezer) s'ils existent
+      if (localTracks && localTracks.length > 0) {
+        Logger.info(`Utilisation des ${localTracks.length} tracks locaux (Deezer/Import)`);
+        tracks = localTracks;
+      } else {
+        // ✅ SERVICE: Sinon, récupérer les tracks par catégorie (Spotify)
+        Logger.info('Récupération des tracks via MusicService (Spotify)');
+        tracks = await MusicService.fetchTracksByCategory({
+          accessToken: accessToken || '',
+          category: category || 'TOP_RECENT',
+          excludedTrackIds: playedTracks,
+          limit: 100,
+        });
+      }
+
+      // ✅ SERVICE: Trouver un track jouable (iTunes prioritaire)
+      const result = await MusicService.findPlayableTrack(
+        tracks,
+        [...playedTracks, ...Array.from(playedTracksGlobalRef.current)],
+        15
+      );
+
+      if (!result.success || !result.track) {
+        Logger.warn('Aucun extrait audio trouvé', result.error);
+        showToast(result.error || 'Aucun extrait audio trouvé', 'error', 3000);
+        Alert.alert(
+          "Pas de chance",
+          result.error || "Aucun extrait audio trouvé pour cette manche.",
+          [{ text: "Suivant", onPress: () => handleSkip() }]
+        );
+        isLoadingRef.current = false;
+        setLoading(false);
+        return;
+      }
+
+      // Vérifier qu'on est toujours dans le bon round
+      if (roundIdRef.current !== currentRoundId) {
+        Logger.warn("Round ID a changé, on annule le chargement");
+        isLoadingRef.current = false;
+        setLoading(false);
+        return;
+      }
+      
+      Logger.audio.play(`${result.track.artist} - ${result.track.title}`);
+      Logger.info(`Track sélectionné: ${result.track.title} | Source: ${result.track.source || 'Unknown'}`);
+      console.log('🎵 PREVIEW URL:', result.track.preview_url); // LOG CRITIQUE POUR DEBUG
+      
+      // Définir expectedTrackRef avec le roundId
+      expectedTrackRef.current = { ...result.track, roundId: currentRoundId };
+      
+      // Définir currentTrack pour l'affichage
+      setCurrentTrack(result.track);
+      
+      // Ajouter aux tracks joués (session + global)
+      setPlayedTracks(prev => [...prev, result.track!.id]);
+      playedTracksGlobalRef.current.add(result.track.id);
+      
+      // Attendre un micro-délai pour s'assurer que les états sont mis à jour
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Vérifier une dernière fois qu'on est dans le bon round
+      if (roundIdRef.current !== currentRoundId) {
+        Logger.warn("Round ID a changé après setState, on annule le chargement");
+        isLoadingRef.current = false;
+        setLoading(false);
+        return;
+      }
+      
+      // ✅ SOUNDMANAGER: Jouer l'audio
+      const success = await SoundManager.playSound(
+        result.track.preview_url,
+        result.track.id,
+        {
+          shouldLoop: false,
+          volume: 1.0,
+          onPlaybackStatusUpdate: (playing) => {
+            Logger.info(`Playback status: ${playing ? 'Playing' : 'Stopped'}`);
+            setIsPlaying(playing);
+          },
+        }
+      );
+
+      if (!success) {
+        Logger.audio.error("Impossible de lire l'audio");
+        showToast("Erreur de lecture audio", 'error', 3000);
+        Alert.alert("Erreur", "Impossible de lire l'audio");
+        setIsPlaying(false);
+      } else {
+        // ✅ Forcer isPlaying à true après le démarrage
+        Logger.success('Audio démarré avec succès');
+        setIsPlaying(true);
+        
+        // ⚡ PRÉCHARGEMENT : Pendant que le joueur joue, préparer le prochain track
+        Logger.info("Lancement du préchargement du prochain track...");
+        MusicService.prefetchNextTrack(
+          tracks,
+          [...playedTracks, result.track.id, ...Array.from(playedTracksGlobalRef.current)],
+          15
+        );
+      }
+
+    } catch (error) {
+      Logger.error('Erreur critique startRound', error);
+      setLoading(false);
+      isLoadingRef.current = false;
+      showToast("Erreur: Session expirée", 'error', 4000);
+      Alert.alert(
+        "Erreur",
+        "Session expirée ou problème réseau. Reconnexion requise."
+      );
+    } finally {
+      setLoading(false);
+      isLoadingRef.current = false;
+    }
+  };
+
+  // Timer countdown
+  useEffect(() => {
+    // Démarrer le timer seulement si on a un track, qu'on n'a pas encore voté, et qu'on n'est pas en loading
+    if (!loading && currentTrack && !selectedPlayer && !timerRef.current) {
+      Logger.info(`Démarrage du timer à ${timeLeft} secondes`);
+      
+      timerRef.current = setInterval(() => {
+        setTimeLeft((prev) => {
+          if (prev <= 1) {
+            // Timer terminé
+            Logger.warn('Timer terminé - Temps écoulé !');
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            handleTimeOut();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      return () => {
+        if (timerRef.current) {
+          Logger.info('Nettoyage du timer');
+          clearInterval(timerRef.current);
+          timerRef.current = null;
+        }
+      };
+    }
+  }, [loading, currentTrack, selectedPlayer]);
+
+  // Animation du timer quand il reste peu de temps
+  useEffect(() => {
+    if (timeLeft <= 10 && timeLeft > 0) {
+      // Vibration d'alerte quand le temps est bas
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
+      Animated.sequence([
+        Animated.timing(timerScale, { toValue: 1.2, duration: 200, useNativeDriver: true }),
+        Animated.timing(timerScale, { toValue: 1, duration: 200, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [timeLeft]);
+
+  // Animation fluide du visualizer synchronisée avec la musique
+  useEffect(() => {
+    Logger.info(`Visualizer: ${isPlaying ? 'PLAYING' : 'STOPPED'} | Track: ${currentTrack ? 'LOADED' : 'NULL'} | Loading: ${loading}`);
+    
+    if (isPlaying && currentTrack && !loading) {
+      let animationFrameId: number;
+      let isActive = true;
+      
+      // Fonction d'animation continue à 60 FPS
+      const animateBars = () => {
+        if (!isActive) return;
+        
+        barAnims.forEach((barAnim, index) => {
+          // Créer des motifs variés basés sur l'index et le temps
+          const time = Date.now() / 1000;
+          const frequency = 2.0 + (index % 5) * 0.6; // Fréquences rapides
+          const phase = index * 0.15; // Déphasage pour effet de vague
+          
+          // Calculer une valeur entre 0.3 et 1.0 avec des variations sinusoïdales
+          const baseValue = 0.5 + Math.sin(time * frequency + phase) * 0.4;
+          const randomVariation = Math.random() * 0.1;
+          const targetValue = Math.max(0.3, Math.min(1.0, baseValue + randomVariation));
+          
+          // Animation instantanée à 60 FPS
+          Animated.timing(barAnim, {
+            toValue: targetValue,
+            duration: 16, // ~60 FPS (16.67ms par frame)
+            useNativeDriver: true,
+          }).start();
+        });
+        
+        // Rafraîchir toutes les 16ms (60 FPS) avec setTimeout
+        animationFrameId = setTimeout(() => {
+          animateBars();
+        }, 16) as any;
+      };
+
+      Logger.info('Démarrage du visualizer audio réactif');
+      animateBars();
+
+      return () => {
+        Logger.info('Arrêt du visualizer');
+        isActive = false;
+        if (animationFrameId) {
+          clearTimeout(animationFrameId);
+        }
+        barAnims.forEach(barAnim => barAnim.stopAnimation());
+      };
+    } else {
+      // Réinitialiser toutes les barres
+      Logger.info('Réinitialisation des barres du visualizer');
+      barAnims.forEach((barAnim, index) => {
+        barAnim.stopAnimation();
+        // Variation légère même au repos pour effet "standby"
+        const restValue = 0.2 + (index % 3) * 0.05;
+        Animated.timing(barAnim, {
+          toValue: restValue,
+          duration: 300,
+          useNativeDriver: true,
+        }).start();
+      });
+    }
+  }, [isPlaying, currentTrack, loading]);
+
+  // --- 4. ACTIONS JOUEUR ---
+  // On passe aussi les scores cumulés à Reveal
+  const navigateToReveal = (score: number) => {
+    navigation.navigate('Reveal', {
+      correctPlayer: currentTrack?.correctPlayer || 'Inconnu',
+      track: currentTrack,
+      score: score,
+      round: round,
+      playerScores: playerScores,
+      selectedPlayer: selectedPlayer ?? undefined,
+      category: category,
+    });
+  };
+
+  const handleVote = async (playerId: string) => {
+    if (selectedPlayer) return;
+    
+    // Feedback haptique fort au vote
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+    
+    const playerName = MOCK_PLAYERS.find(p => p.id === playerId)?.name || 'Unknown';
+    Logger.game.answer(true, 500 + (timeLeft * 30));
+    Logger.info(`Vote pour: ${playerName} | Temps restant: ${timeLeft}s`);
+    
+    // Arrêter le timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    setSelectedPlayer(playerId);
+    
+    // ✅ Arrêter complètement le son avant de naviguer
+    await stopSound(true);
+    setIsPlaying(false);
+
+    const baseScore = 500;
+    const timeBonus = timeLeft * 30;
+    const totalScore = baseScore + timeBonus;
+    
+    // On incrémente le score du joueur sélectionné
+    const newScores = {
+      ...playerScores,
+      [playerId]: (playerScores[playerId] || 0) + totalScore
+    };
+    setPlayerScores(newScores);
+    Logger.nav('Reveal', { score: totalScore, round });
+    navigateToReveal(totalScore);
+  };
+
+  const handleSkip = async () => {
+    // Feedback haptique léger pour le skip
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Arrêter le timer
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // ✅ Arrêter complètement le son avant de naviguer
+    await stopSound(true);
+    setIsPlaying(false);
+    navigateToReveal(0);
+  };
+
+  const handleTimeOut = async () => {
+    // ✅ Arrêter complètement le son avant de naviguer
+    await stopSound(true);
+    setIsPlaying(false);
+    navigateToReveal(0);
+  };
+
+  // --- 5. RENDER ---
+  if (loading) {
+    return (
+      <SafeContainer>
+        <View style={styles.loadingContainer}>
+          {/* Header avec indicateur de manche */}
+          <View style={styles.loadingHeader}>
+            <View style={styles.loadingBadge}>
+              <Ionicons name="musical-notes" color={COLORS.SPOTIFY_GREEN} size={24} />
+            </View>
+            <Text style={styles.loadingTitle}>PRÉPARATION</Text>
+            <Text style={styles.loadingRound}>Manche {round} / {GAME_CONFIG.MAX_ROUNDS}</Text>
+          </View>
+
+          {/* Animation circulaire */}
+          <View style={styles.loadingAnimation}>
+            <View style={styles.loadingCircle}>
+              <ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} />
+            </View>
+          </View>
+
+          {/* Message */}
+          <View style={styles.loadingMessage}>
+            <Text style={styles.loadingText}>Recherche d'un extrait...</Text>
+            <Text style={styles.loadingSubText}>Préparez-vous ! 🎵</Text>
+          </View>
+
+          {/* Indicateur de progression */}
+          <View style={styles.loadingProgress}>
+            {Array.from({ length: GAME_CONFIG.MAX_ROUNDS }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.progressDot,
+                  index < round && styles.progressDotCompleted,
+                  index === round - 1 && styles.progressDotCurrent,
+                ]}
+              />
+            ))}
+          </View>
+        </View>
+      </SafeContainer>
+    );
+  }
+
+  return (
+    <SafeContainer>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.roundIndicator}>MANCHE {round} / {GAME_CONFIG.MAX_ROUNDS}</Text>
+          <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
+            <Text style={styles.skipText}>PASSER</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Section centrale : Timer + Points + Visualizer */}
+        <View style={styles.centerSection}>
+          {/* Timer circulaire moderne */}
+          <View style={styles.timerContainer}>
+            <CircularTimer 
+              timeLeft={timeLeft} 
+              maxTime={15}
+              size={160}
+            />
+            <Text style={styles.pointsPreview}>{500 + (timeLeft * 30)} pts</Text>
+          </View>
+
+          {/* Visualizer audio fluide avec barres indépendantes */}
+          <View style={styles.visualizerContainer}>
+            {barAnims.map((barAnim, i) => {
+              const barHeight = 30 + (i % 5) * 12; // Hauteurs variées
+              return (
+                <Animated.View 
+                  key={i} 
+                  style={[
+                    styles.visualizerBar, 
+                    { 
+                      height: barHeight,
+                      transform: [{ scaleY: barAnim }],
+                    }
+                  ]} 
+                />
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Grille de joueurs avec design moderne */}
+        <View style={styles.playersGrid}>
+        {MOCK_PLAYERS.map((player) => (
+          <TouchableOpacity
+            key={player.id}
+            activeOpacity={0.7}
+            onPress={() => handleVote(player.id)}
+            style={styles.playerVoteWrapper}
+          >
+            <View style={styles.playerVote}>
+              <View style={styles.playerVoteContent}>
+                {/* Avatar */}
+                <View style={styles.avatarContainer}>
+                  {/* Avatar principal avec bordure intégrée */}
+                  <View style={[styles.avatarWrapper, { 
+                    borderColor: player.color,
+                    borderWidth: selectedPlayer === player.id ? 3 : 2,
+                  }]}>
+                    <View style={[styles.avatar, { backgroundColor: player.color }]}>
+                      <Text style={styles.avatarEmoji}>{player.emoji}</Text>
+                    </View>
+                  </View>
+                  
+                  {/* Checkmark si sélectionné */}
+                  {selectedPlayer === player.id && (
+                    <View style={styles.checkmarkBadge}>
+                      <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                    </View>
+                  )}
+                </View>
+                
+                {/* Nom du joueur */}
+                <Text style={[
+                  styles.playerVoteName,
+                  selectedPlayer === player.id && styles.playerVoteNameSelected
+                ]}>{player.name}</Text>
+              </View>
+            </View>
+          </TouchableOpacity>
+        ))}
+        </View>
+      </View>
+    </SafeContainer>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, justifyContent: 'space-between' },
+  header: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  roundIndicator: { color: COLORS.TEXT_PRIMARY, fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
+  skipButton: { backgroundColor: COLORS.DARK_SECONDARY, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
+  skipText: { color: COLORS.TEXT_SECONDARY, fontWeight: '700', fontSize: 12, textAlign: 'center' },
+  centerSection: { alignItems: 'center', flex: 0 },
+  timerContainer: { alignItems: 'center', marginBottom: 20 },
+  pointsPreview: { color: COLORS.SPOTIFY_GREEN, fontSize: 16, fontWeight: '900', marginTop: 10 },
+  visualizerContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    height: 80, 
+    marginBottom: 20,
+    gap: 4,
+  },
+  visualizerBar: { 
+    width: 7, 
+    backgroundColor: COLORS.SPOTIFY_GREEN, 
+    borderRadius: 3.5,
+  },
+  playersGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    justifyContent: 'space-between', 
+    width: '100%', 
+    gap: 12, 
+    paddingBottom: 20,
+  },
+  playerVoteWrapper: { 
+    width: '48%',
+  },
+  playerVote: { 
+    width: '100%', 
+    minHeight: 150,
+    borderRadius: 20,
+    backgroundColor: 'rgba(40, 40, 40, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  playerVoteContent: { 
+    paddingVertical: 16, 
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 80,
+    height: 80,
+  },
+  avatarWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    padding: 3,
+    backgroundColor: COLORS.DARK_BG,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatar: { 
+    width: '100%',
+    height: '100%',
+    borderRadius: 37, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+  },
+  avatarEmoji: { 
+    fontSize: 36 
+  },
+  checkmarkBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.SUCCESS_GREEN,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: COLORS.DARK_BG,
+  },
+  playerVoteName: { 
+    color: COLORS.TEXT_PRIMARY, 
+    fontSize: 15, 
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  playerVoteNameSelected: {
+    color: COLORS.SUCCESS_GREEN,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingHeader: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  loadingBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(29, 185, 84, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+  },
+  loadingTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.TEXT_PRIMARY,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  loadingRound: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.SPOTIFY_GREEN,
+    letterSpacing: 1,
+  },
+  loadingAnimation: {
+    marginBottom: 40,
+  },
+  loadingCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(29, 185, 84, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+  },
+  loadingMessage: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.TEXT_PRIMARY,
+    marginBottom: 8,
+  },
+  loadingSubText: {
+    fontSize: 14,
+    color: COLORS.TEXT_SECONDARY,
+    fontWeight: '600',
+  },
+  loadingProgress: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'center',
+  },
+  progressDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.DARK_TERTIARY,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  progressDotCompleted: {
+    backgroundColor: COLORS.SPOTIFY_GREEN,
+    borderColor: COLORS.SPOTIFY_GREEN,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+  },
+  progressDotCurrent: {
+    backgroundColor: COLORS.SPOTIFY_GREEN,
+    borderColor: COLORS.SPOTIFY_GREEN,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    borderWidth: 3,
+  },
+});
