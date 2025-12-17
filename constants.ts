@@ -21,6 +21,7 @@ export const COLORS = {
   SUCCESS_GREEN: '#1DB954',
   INFO_BLUE: '#4ECDC4',
   GOLD: '#F5B041',
+  DEEZER_PURPLE: '#9B51E0', // Mise à jour vers rgb(155, 81, 224)
   
   // Couleurs joueurs
   PLAYER_COLORS: {
