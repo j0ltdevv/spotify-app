@@ -2,8 +2,9 @@ import React, { createContext, useState, useContext, ReactNode, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, TOKEN_CONFIG } from '../constants';
 import { isTokenExpired, calculateExpiryTime, validateToken } from '../utils/spotifyRefresh';
-import { onAuthStateChanged, User, signInAnonymously, signOut } from 'firebase/auth'; // Import signInAnonymously
+import { onAuthStateChanged, User, signInAnonymously, signOut, updateProfile } from 'firebase/auth'; // Import signInAnonymously and updateProfile
 import { app, auth } from '../services/FirebaseService'; // Import the Firebase app and auth instance
+import UserService from '../services/UserService'; // Import UserService
 
 // 1. Définition des types pour le contexte
 interface AuthContextType {
@@ -31,6 +32,25 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     loadToken();
   }, []);
+
+  // Sync Profile if missing (Self-healing for existing users)
+  useEffect(() => {
+    const syncProfile = async () => {
+      if (accessToken && firebaseUser && (!firebaseUser.displayName || !firebaseUser.photoURL)) {
+         console.log('🔄 Synchronisation du profil manquant...');
+         const profileResult = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
+         if (profileResult.success && profileResult.user) {
+            await updateProfile(firebaseUser, {
+                displayName: profileResult.user.display_name,
+                photoURL: profileResult.user.images?.[0]?.url
+            });
+            // Force update local state
+            setFirebaseUser({ ...firebaseUser, displayName: profileResult.user.display_name, photoURL: profileResult.user.images?.[0]?.url || null });
+         }
+      }
+    };
+    syncProfile();
+  }, [accessToken, firebaseUser]); // Dependencies: run when token or user changes
 
   // Listen for Firebase Auth state changes
   useEffect(() => {
@@ -126,8 +146,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsLoading(true);
       // We use Anonymous auth to avoid requiring "Identity Platform" (which needs a credit card)
       // The Spotify profile data will be linked manually in Firestore using the anonymous User ID
-      await signInAnonymously(auth);
+      const userCredential = await signInAnonymously(auth);
       console.log('✅ Authentifié anonymement sur Firebase (Plan Gratuit)');
+
+      // Fetch Spotify Profile
+      const profileResult = await UserService.fetchUserProfile(spotifyAccessToken, userCredential.user.uid);
+      
+      if (profileResult.success && profileResult.user) {
+          // Update Firebase User Profile
+          await updateProfile(userCredential.user, {
+              displayName: profileResult.user.display_name,
+              photoURL: profileResult.user.images?.[0]?.url
+          });
+          
+          // Force update local state to reflect changes immediately
+          setFirebaseUser({ ...userCredential.user, displayName: profileResult.user.display_name, photoURL: profileResult.user.images?.[0]?.url || null });
+          console.log('✅ Profil Firebase mis à jour avec infos Spotify');
+      }
+
     } catch (error) {
       console.error('❌ Erreur authentification Firebase:', error);
       throw error;

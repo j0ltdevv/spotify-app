@@ -1,6 +1,8 @@
-import React, { useRef } from 'react';
-import { TouchableOpacity, Animated, ViewStyle } from 'react-native';
+import React, { useRef } from 'react'; // useRef est mieux pour les valeurs animées
+import { Pressable, StyleSheet, ViewStyle, Animated } from 'react-native';
 import * as Haptics from 'expo-haptics';
+
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 interface PressableCardProps {
   children: React.ReactNode;
@@ -9,95 +11,50 @@ interface PressableCardProps {
   disabled?: boolean;
 }
 
-export default function PressableCard({ 
-  children, 
-  onPress, 
-  style, 
-  disabled = false 
-}: PressableCardProps) {
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const glowAnim = useRef(new Animated.Value(0)).current;
+export default function PressableCard({ children, onPress, style, disabled }: PressableCardProps) {
+  // Utiliser useRef pour que la valeur persiste entre les rendus
+  const animatedScale = useRef(new Animated.Value(1)).current;
 
   const handlePressIn = () => {
-    if (disabled) return;
-    
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 0.95,
-        tension: 300,
-        friction: 10,
-        useNativeDriver: true,
-      }),
-      Animated.timing(glowAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    Animated.spring(animatedScale, {
+      toValue: 0.96,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
+    if (!disabled) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const handlePressOut = () => {
-    if (disabled) return;
-    
-    Animated.parallel([
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        tension: 300,
-        friction: 10,
-        useNativeDriver: true,
-      }),
-      Animated.timing(glowAnim, {
-        toValue: 0,
-        duration: 150,
-        useNativeDriver: true,
-      }),
-    ]).start();
+    Animated.spring(animatedScale, {
+      toValue: 1,
+      useNativeDriver: true,
+      speed: 20,
+    }).start();
   };
 
-  const glowOpacity = glowAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.3],
-  });
-
   return (
-    <TouchableOpacity
-      activeOpacity={1}
+    <AnimatedPressable
+      onPress={onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
-      onPress={() => {
-        if (!disabled) {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-          onPress();
-        }
-      }}
       disabled={disabled}
+      style={[
+        styles.container,
+        style,
+        disabled && styles.disabled,
+        { transform: [{ scale: animatedScale }] }
+      ]}
     >
-      <Animated.View
-        style={[
-          style,
-          {
-            transform: [{ scale: scaleAnim }],
-          },
-        ]}
-      >
-        {/* Effet de glow au clic */}
-        <Animated.View
-          style={{
-            position: 'absolute',
-            top: -4,
-            left: -4,
-            right: -4,
-            bottom: -4,
-            backgroundColor: '#FFFFFF',
-            borderRadius: 24,
-            opacity: glowOpacity,
-            zIndex: -1,
-          }}
-        />
-        {children}
-      </Animated.View>
-    </TouchableOpacity>
+      {children}
+    </AnimatedPressable>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    overflow: 'hidden',
+  },
+  disabled: {
+    opacity: 0.6,
+  }
+});

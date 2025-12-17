@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useGame } from '../contexts/GameContext'; // Added useGame
 import { useToast } from '../contexts/ToastContext';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Alert, ActivityIndicator, Image } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { MOCK_PLAYERS, GAME_CONFIG, COLORS } from '../constants';
+import { GAME_CONFIG, COLORS } from '../constants';
 import SafeContainer from '../components/SafeContainer';
 import MusicService from '../services/MusicService';
 import SoundManager from '../utils/SoundManager';
@@ -26,6 +27,7 @@ const { width } = Dimensions.get('window');
 
 export default function GameScreen(props: GameScreenProps) {
   const { navigation, route } = props;
+  const { isHost, setGameTrack, currentTrack: sharedTrack, trackPool, players } = useGame(); // Multiplayer hooks
   // Récupération des paramètres avec valeurs par défaut
   const { accessToken: rawAccessToken } = useAuth();
   const { showToast } = useToast();
@@ -111,13 +113,14 @@ export default function GameScreen(props: GameScreenProps) {
       // Générer les résultats finaux réels avec vérification
       Logger.info(`Fin de partie - Round ${round} | Scores:`, playerScores);
       
-      const results = MOCK_PLAYERS.map(player => {
+      const results = players.map(player => {
         const result = {
           name: player.name || 'Joueur inconnu',
           score: playerScores[player.id] || 0,
           avatar: { 
             color: player.color || '#1DB954', 
-            emoji: player.emoji || '🎵' 
+            emoji: player.emoji || '🎵',
+            image: player.image
           }
         };
         Logger.info(`Joueur ${player.name}: ${result.score} points`);
@@ -175,6 +178,65 @@ export default function GameScreen(props: GameScreenProps) {
     setIsPlaying(false);
   };
 
+  const playTrackLogic = async (track: GameTrack) => {
+      // Définir expectedTrackRef avec le roundId
+      // Note: track.roundId should be set by host before sharing
+      expectedTrackRef.current = track;
+      
+      // Définir currentTrack pour l'affichage
+      setCurrentTrack(track);
+      
+      // Ajouter aux tracks joués (session + global)
+      setPlayedTracks(prev => [...prev, track.id]);
+      playedTracksGlobalRef.current.add(track.id);
+      
+      // Attendre un micro-délai
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // ✅ SOUNDMANAGER: Jouer l'audio
+      const success = await SoundManager.playSound(
+        track.preview_url,
+        track.id,
+        {
+          shouldLoop: false,
+          volume: 1.0,
+          onPlaybackStatusUpdate: (playing) => {
+            Logger.info(`Playback status: ${playing ? 'Playing' : 'Stopped'}`);
+            setIsPlaying(playing);
+          },
+        }
+      );
+
+      if (!success) {
+        Logger.audio.error("Impossible de lire l'audio");
+        showToast("Erreur de lecture audio", 'error', 3000);
+        setIsPlaying(false);
+      } else {
+        Logger.success('Audio démarré avec succès');
+        setIsPlaying(true);
+        setLoading(false);
+        isLoadingRef.current = false;
+        
+        // Préchargement (seulement si host pour éviter double fetch ?) 
+        // Les invités n'ont pas la liste des tracks, donc seul le host précharge et mettra en cache
+        if (isHost && localTracks) { 
+            // Prefetch logic if needed
+        }
+      }
+  };
+
+  // --- LISTENER POUR INVITÉS ---
+  useEffect(() => {
+    // Si je ne suis pas l'hôte et que je reçois un nouveau track
+    if (!isHost && sharedTrack) {
+        // Vérifier si c'est un nouveau track (par ID ou roundId)
+        if (sharedTrack.id !== currentTrack?.id) {
+            console.log("🎧 INVITÉ: Nouveau track reçu de l'hôte !", sharedTrack.title);
+            playTrackLogic(sharedTrack);
+        }
+    }
+  }, [sharedTrack, isHost]);
+
   const startRound = async () => {
     // Éviter les appels concurrents
     if (isLoadingRef.current) {
@@ -196,14 +258,32 @@ export default function GameScreen(props: GameScreenProps) {
     Logger.game.start(round, category || 'TOP_RECENT');
     Logger.info(`Démarrage de la manche ${round} avec ID: ${currentRoundId}`);
     try {
+      if (!isHost) {
+          Logger.info("Invité: En attente de la sélection de l'hôte...");
+          // Si on a déjà le track partagé (cas de reconnexion ou délai), on le joue direct
+          if (sharedTrack && sharedTrack.roundId === currentRoundId) {
+               Logger.info("Invité: Track déjà disponible, lecture...");
+               await playTrackLogic(sharedTrack);
+          }
+          return; // On arrête ici pour l'invité, le useEffect prendra le relais
+      }
+
+      // --- LOGIQUE HÔTE SEULEMENT ---
       let tracks: GameTrack[] = [];
 
-      // ✅ LOGIC: Utiliser les tracks locaux (Deezer) s'ils existent
+      // ✅ LOGIC 1: Utiliser les tracks locaux (Deezer) s'ils existent
       if (localTracks && localTracks.length > 0) {
         Logger.info(`Utilisation des ${localTracks.length} tracks locaux (Deezer/Import)`);
         tracks = localTracks;
-      } else {
-        // ✅ SERVICE: Sinon, récupérer les tracks par catégorie (Spotify)
+      } 
+      // ✅ LOGIC 2: Utiliser le POT COMMUN (Mélange des joueurs)
+      else if (trackPool && trackPool.length > 0 && category?.startsWith('TOP_')) {
+        Logger.info(`🎱 Utilisation du Pot Commun (${trackPool.length} titres partagés)`);
+        // On mélange le pool pour être sûr
+        tracks = trackPool.sort(() => Math.random() - 0.5);
+      }
+      else {
+        // ✅ LOGIC 3: Sinon, récupérer les tracks par catégorie (Spotify - Host Only)
         Logger.info('Récupération des tracks via MusicService (Spotify)');
         tracks = await MusicService.fetchTracksByCategory({
           accessToken: accessToken || '',
@@ -242,62 +322,27 @@ export default function GameScreen(props: GameScreenProps) {
       }
       
       Logger.audio.play(`${result.track.artist} - ${result.track.title}`);
-      Logger.info(`Track sélectionné: ${result.track.title} | Source: ${result.track.source || 'Unknown'}`);
-      console.log('🎵 PREVIEW URL:', result.track.preview_url); // LOG CRITIQUE POUR DEBUG
+      Logger.info(`Track sélectionné: ${result.track.title}`);
       
-      // Définir expectedTrackRef avec le roundId
-      expectedTrackRef.current = { ...result.track, roundId: currentRoundId };
-      
-      // Définir currentTrack pour l'affichage
-      setCurrentTrack(result.track);
-      
-      // Ajouter aux tracks joués (session + global)
-      setPlayedTracks(prev => [...prev, result.track!.id]);
-      playedTracksGlobalRef.current.add(result.track.id);
-      
-      // Attendre un micro-délai pour s'assurer que les états sont mis à jour
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
-      // Vérifier une dernière fois qu'on est dans le bon round
-      if (roundIdRef.current !== currentRoundId) {
-        Logger.warn("Round ID a changé après setState, on annule le chargement");
-        isLoadingRef.current = false;
-        setLoading(false);
-        return;
-      }
-      
-      // ✅ SOUNDMANAGER: Jouer l'audio
-      const success = await SoundManager.playSound(
-        result.track.preview_url,
-        result.track.id,
-        {
-          shouldLoop: false,
-          volume: 1.0,
-          onPlaybackStatusUpdate: (playing) => {
-            Logger.info(`Playback status: ${playing ? 'Playing' : 'Stopped'}`);
-            setIsPlaying(playing);
-          },
-        }
-      );
+      // ✅ AJOUTER LE ROUND ID AU TRACK POUR LA SYNCHRO
+      const trackWithRoundId = { ...result.track, roundId: currentRoundId };
 
-      if (!success) {
-        Logger.audio.error("Impossible de lire l'audio");
-        showToast("Erreur de lecture audio", 'error', 3000);
-        Alert.alert("Erreur", "Impossible de lire l'audio");
-        setIsPlaying(false);
-      } else {
-        // ✅ Forcer isPlaying à true après le démarrage
-        Logger.success('Audio démarré avec succès');
-        setIsPlaying(true);
-        
-        // ⚡ PRÉCHARGEMENT : Pendant que le joueur joue, préparer le prochain track
-        Logger.info("Lancement du préchargement du prochain track...");
-        MusicService.prefetchNextTrack(
-          tracks,
-          [...playedTracks, result.track.id, ...Array.from(playedTracksGlobalRef.current)],
-          15
-        );
+      // 1. Envoyer à Firebase (Hôte seulement)
+      if (isHost) {
+          console.log('📤 Envoi du track aux autres joueurs...');
+          setGameTrack(trackWithRoundId);
       }
+
+      // 2. Jouer localement
+      await playTrackLogic(trackWithRoundId);
+
+      // Préchargement (Host only)
+      Logger.info("Lancement du préchargement du prochain track...");
+      MusicService.prefetchNextTrack(
+        tracks,
+        [...playedTracks, result.track.id, ...Array.from(playedTracksGlobalRef.current)],
+        15
+      );
 
     } catch (error) {
       Logger.error('Erreur critique startRound', error);
@@ -443,7 +488,7 @@ export default function GameScreen(props: GameScreenProps) {
     // Feedback haptique fort au vote
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
-    const playerName = MOCK_PLAYERS.find(p => p.id === playerId)?.name || 'Unknown';
+    const playerName = players.find(p => p.id === playerId)?.name || 'Unknown';
     Logger.game.answer(true, 500 + (timeLeft * 30));
     Logger.info(`Vote pour: ${playerName} | Temps restant: ${timeLeft}s`);
     
@@ -586,7 +631,7 @@ export default function GameScreen(props: GameScreenProps) {
 
         {/* Grille de joueurs avec design moderne */}
         <View style={styles.playersGrid}>
-        {MOCK_PLAYERS.map((player) => (
+        {players.map((player) => (
           <TouchableOpacity
             key={player.id}
             activeOpacity={0.7}
@@ -603,7 +648,11 @@ export default function GameScreen(props: GameScreenProps) {
                     borderWidth: selectedPlayer === player.id ? 3 : 2,
                   }]}>
                     <View style={[styles.avatar, { backgroundColor: player.color }]}>
-                      <Text style={styles.avatarEmoji}>{player.emoji}</Text>
+                      {player.image ? (
+                        <Image source={{ uri: player.image }} style={styles.avatarImage} />
+                      ) : (
+                        <Text style={styles.avatarEmoji}>{player.emoji}</Text>
+                      )}
                     </View>
                   </View>
                   
@@ -703,6 +752,11 @@ const styles = StyleSheet.create({
   },
   avatarEmoji: { 
     fontSize: 36 
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 37,
   },
   checkmarkBadge: {
     position: 'absolute',

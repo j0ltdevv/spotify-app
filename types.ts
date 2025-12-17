@@ -85,6 +85,7 @@ export interface Player {
 export interface PlayerAvatar {
   color: string;
   emoji: string;
+  image?: string;
 }
 
 export interface GameResult {

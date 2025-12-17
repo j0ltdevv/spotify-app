@@ -1,341 +1,198 @@
-import React, { useEffect, useState } from 'react';
-import { useToast } from '../contexts/ToastContext';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, ScrollView } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, ScrollView, StatusBar, Platform, Image } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
-import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { COLORS, ANIMATION_CONFIG } from '../constants';
+import { BlurView } from 'expo-blur'; // Optionnel pour effet verre, sinon View simple
+
+import { useToast } from '../contexts/ToastContext';
+import { RootStackParamList } from '../App';
+import { COLORS } from '../constants';
 import { GameResult } from '../types';
 import Logger from '../utils/logger';
+
+const { width, height } = Dimensions.get('window');
+const PODIUM_WIDTH = width * 0.9; // 90% de la largeur
+const SLOT_WIDTH = PODIUM_WIDTH / 3; // 3 colonnes exactes
 
 type GameOverScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'GameOver'>;
   route: RouteProp<RootStackParamList, 'GameOver'>;
 };
 
-const { width, height } = Dimensions.get('window');
+// --- COMPOSANT PODIUM ITEM (Design Épuré Amélioré) ---
+const PodiumItem = ({ player, rank, animValue }: { player: GameResult; rank: number; animValue: Animated.Value }) => {
+  const isWinner = rank === 0;
+  
+  // Config visuelle selon le rang
+  const config = useMemo(() => {
+    switch(rank) {
+      case 0: return { height: 160, medal: '🥇', scale: 1.1, color: ['#1DB954', '#1ed760'] };
+      case 1: return { height: 110, medal: '🥈', scale: 0.9, color: ['#3E3E3E', '#505050'] };
+      case 2: return { height: 80,  medal: '🥉', scale: 0.8, color: ['#2A2A2A', '#333333'] };
+      default: return { height: 50, medal: '', scale: 1, color: ['#000', '#000'] };
+    }
+  }, [rank]);
+
+  return (
+    <Animated.View style={[
+      styles.podiumSlot,
+      {
+        opacity: animValue,
+        transform: [
+          { translateY: animValue.interpolate({ inputRange: [0, 1], outputRange: [150, 0] }) },
+        ],
+      }
+    ]}>
+      {/* Avatar & Info Container */}
+      <View style={[styles.avatarContainer, { transform: [{ scale: config.scale }] }]}>
+        <View style={[styles.avatarCircle, { backgroundColor: player.avatar.color, borderColor: isWinner ? '#1DB954' : 'transparent', borderWidth: isWinner ? 3 : 0 }]}>
+          {player.avatar.image ? (
+            <Image source={{ uri: player.avatar.image }} style={styles.avatarImage} />
+          ) : (
+            <Text style={styles.avatarEmoji}>{player.avatar.emoji}</Text>
+          )}
+          {/* Le rankBadge a été retiré ici */}
+        </View>
+        <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
+        <Text style={[styles.playerScore, { color: isWinner ? '#1DB954' : '#FFF' }]}>{player.score} pts</Text>
+      </View>
+
+      {/* Barre du Podium (MODIFIÉE) */}
+      <LinearGradient
+        colors={config.color as any}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={[styles.podiumBar, { height: config.height }]}
+      >
+        {/* NOUVEAU : Rang en très grand et semi-transparent */}
+        <Text style={styles.pedestalRankLarge}>#{rank + 1}</Text>
+        {/* L'icône de médaille reste en haut */}
+        <Text style={styles.medalIcon}>{config.medal}</Text>
+      </LinearGradient>
+    </Animated.View>
+  );
+};
 
 export default function GameOverScreen({ navigation, route }: GameOverScreenProps) {
-  const { results = [] } = route.params as { results?: GameResult[] };
+  const { results = [] } = route.params || {};
   const { showToast } = useToast();
 
-  // Vérification de sécurité
-  if (!results || results.length === 0) {
-    Logger.error('GameOverScreen: Pas de résultats fournis');
-    // Rediriger vers le lobby si pas de résultats
-    React.useEffect(() => {
-      navigation.replace('Lobby', {});
-    }, []);
-    return null;
-  }
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const podiumAnims = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
+  const listAnim = useRef(new Animated.Value(0)).current;
 
-  const [fadeAnim] = useState(new Animated.Value(0));
-  const [podiumAnims] = useState([
-    new Animated.Value(0), // 1er
-    new Animated.Value(0), // 2e
-    new Animated.Value(0), // 3e
-  ]);
-  const [listAnim] = useState(new Animated.Value(0));
-  const [confettiAnim] = useState(new Animated.Value(0));
-  const [rotateAnim] = useState(new Animated.Value(0));
+  // Data processing
+  const { topThree, others, winner } = useMemo(() => {
+    if (!results || !results.length) return { topThree: [], others: [], winner: null };
+    const sorted = [...results].sort((a, b) => (b?.score || 0) - (a?.score || 0));
+    return { winner: sorted[0], topThree: sorted.slice(0, 3), others: sorted.slice(3) };
+  }, [results]);
 
   useEffect(() => {
-    // Haptic feedback
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    
-    // Log des résultats avec vérification de sécurité
-    const sortedResults = [...results].sort((a, b) => (b?.score || 0) - (a?.score || 0));
-    const winner = sortedResults[0];
-    
-    if (winner) {
-      Logger.game.end(winner.score || 0);
-      Logger.success(`🏆 Gagnant: ${winner.name} avec ${winner.score || 0} points`);
-      Logger.info(`Classement final: ${results.length} joueurs`);
-      
-      // Toast de félicitations après un court délai
-      setTimeout(() => {
-        showToast(`🏆 ${winner.name} remporte la partie !`, 'success', 3000);
-      }, 1500);
-    } else {
-      Logger.warn('GameOverScreen: Aucun gagnant trouvé');
+    if (!results || !results.length) {
+      navigation.replace('Lobby', {});
+      return;
     }
 
-    // Animation séquencée
+    // Sequence d'animation
     Animated.sequence([
-      // 1. Fade in général
-      Animated.timing(fadeAnim, { 
-        toValue: 1, 
-        duration: 500, 
-        useNativeDriver: true 
-      }),
-      // 2. Confettis
-      Animated.timing(confettiAnim, { 
-        toValue: 1, 
-        duration: 800, 
-        useNativeDriver: true 
-      }),
-      // 3. Podium en cascade (2e, 1er, 3e pour l'effet)
-      Animated.stagger(200, [
-        Animated.spring(podiumAnims[1], { 
-          toValue: 1, 
-          friction: 8, 
-          tension: 40,
-          useNativeDriver: true 
-        }),
-        Animated.spring(podiumAnims[0], { 
-          toValue: 1, 
-          friction: 8, 
-          tension: 40,
-          useNativeDriver: true 
-        }),
-        Animated.spring(podiumAnims[2], { 
-          toValue: 1, 
-          friction: 8, 
-          tension: 40,
-          useNativeDriver: true 
-        }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.stagger(150, [
+        Animated.spring(podiumAnims[1], { toValue: 1, damping: 12, useNativeDriver: true }), // 2nd
+        Animated.spring(podiumAnims[0], { toValue: 1, damping: 12, useNativeDriver: true }), // 1er
+        Animated.spring(podiumAnims[2], { toValue: 1, damping: 12, useNativeDriver: true }), // 3eme
       ]),
-      // 4. Liste des autres
-      Animated.timing(listAnim, { 
-        toValue: 1, 
-        duration: 500, 
-        useNativeDriver: true 
-      }),
+      Animated.timing(listAnim, { toValue: 1, duration: 500, useNativeDriver: true })
     ]).start();
 
-    // Animation de rotation continue du trophée
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(rotateAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotateAnim, {
-          toValue: 0,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
   }, []);
-
-  // Trier avec vérification de sécurité
-  const sortedResults = [...results].sort((a, b) => (b?.score || 0) - (a?.score || 0));
-  const topThree = sortedResults.slice(0, 3).filter(r => r && r.name); // Filtrer les résultats valides
-  const others = sortedResults.slice(3).filter(r => r && r.name);
-
-  const rotation = rotateAnim.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['-10deg', '10deg'],
-  });
 
   const handleReplay = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    Logger.info('Relancer une nouvelle partie');
-    Logger.nav('Game', { round: 1, replay: true });
-    showToast('Nouvelle partie lancée !', 'info', 2000);
-    navigation.replace('Game', { round: 1, gameId: Date.now() });
+    navigation.replace('Game', { round: 1, gameId: Date.now(), replay: true });
   };
 
-  const handleBackToMenu = () => {
+  const handleMenu = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    Logger.info('Retour au lobby');
-    Logger.nav('Lobby');
     navigation.navigate('Lobby', {});
   };
 
-  const getPodiumHeight = (position: number) => {
-    switch(position) {
-      case 0: return 140; // 1er - le plus haut
-      case 1: return 105; // 2e
-      case 2: return 75;  // 3e
-      default: return 70;
-    }
-  };
-
-  const getMedalColor = (position: number): [string, string] => {
-    switch(position) {
-      case 0: return ['#1DB954', '#1ed760']; // Vert Spotify pour le 1er
-      case 1: return ['#282828', '#404040']; // Gris foncé pour le 2e
-      case 2: return ['#535353', '#6a6a6a']; // Gris clair pour le 3e
-      default: return ['#282828', '#1a1a1a'];
-    }
-  };
-
-  const renderPodiumPlayer = (player: any, position: number, arrayIndex: number) => {
-    const medals = ['🥇', '🥈', '🥉'];
-    const heights = [140, 105, 75];
-    
-    return (
-      <Animated.View
-        key={position}
-        style={[
-          styles.podiumSlot,
-          {
-            opacity: podiumAnims[arrayIndex],
-            transform: [
-              {
-                translateY: podiumAnims[arrayIndex].interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [100, 0],
-                }),
-              },
-              {
-                scale: podiumAnims[arrayIndex].interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.5, 1],
-                }),
-              },
-            ],
-          },
-        ]}
-      >
-        {/* Avatar */}
-        <View style={[
-          styles.podiumAvatar, 
-          { 
-            backgroundColor: player.avatar.color,
-            borderColor: position === 0 ? COLORS.SPOTIFY_GREEN : COLORS.TEXT_PRIMARY
-          }
-        ]}>
-          <Text style={styles.podiumEmoji}>{player.avatar.emoji}</Text>
-          <View style={[
-            styles.medalBadge,
-            { backgroundColor: position === 0 ? COLORS.SPOTIFY_GREEN : 'rgba(0,0,0,0.8)' }
-          ]}>
-            <Text style={styles.medalIcon}>{medals[position]}</Text>
-          </View>
-        </View>
-
-        {/* Nom */}
-        <Text style={styles.podiumName} numberOfLines={1}>{player.name}</Text>
-        
-        {/* Score */}
-        <View style={styles.scoreContainer}>
-          <Text style={styles.podiumScore}>{player.score}</Text>
-          <Text style={styles.ptsLabel}>pts</Text>
-        </View>
-
-        {/* Piédestal */}
-        <LinearGradient
-          colors={getMedalColor(position)}
-          style={[styles.pedestal, { height: heights[position] }]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-        >
-          <Text style={styles.pedestalRank}>#{position + 1}</Text>
-        </LinearGradient>
-      </Animated.View>
-    );
-  };
+  if (!results.length) return null;
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+      
+      {/* Background Gradient plus subtil */}
       <LinearGradient
-        colors={[COLORS.DARK_BG, COLORS.SPOTIFY_GREEN, COLORS.DARK_BG]}
-        style={StyleSheet.absoluteFillObject}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 1 }}
-        locations={[0, 0.3, 1]}
+        colors={['#191414', '#1DB954', '#191414']}
+        style={StyleSheet.absoluteFill}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
+        locations={[0, 0.4, 0.9]}
+        opacity={0.6}
       />
 
-      {/* Confettis décoratifs - Thème Spotify */}
-      <Animated.View style={[styles.confettiContainer, { opacity: confettiAnim }]}>
-        {[...Array(20)].map((_, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              styles.confetti,
-              {
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 30}%`,
-                backgroundColor: [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT, COLORS.TEXT_PRIMARY, COLORS.DARK_BG][i % 4],
-                transform: [
-                  {
-                    rotate: confettiAnim.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: ['0deg', `${360 * (i % 2 ? 1 : -1)}deg`],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          />
-        ))}
-      </Animated.View>
-
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header avec trophée - Thème Spotify */}
+      <ScrollView 
+        contentContainerStyle={styles.scrollContent} 
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Header Centré */}
         <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
-          <Animated.View style={{ transform: [{ rotate: rotation }] }}>
-            <Ionicons name="trophy" size={50} color={COLORS.SPOTIFY_GREEN} />
-          </Animated.View>
-          <Text style={styles.title}>CLASSEMENT FINAL</Text>
-          <Text style={styles.subtitle}>Bravo à tous les joueurs !</Text>
+          <Text style={styles.title}>RÉSULTATS</Text>
+          <Text style={styles.subtitle}>La partie est terminée</Text>
         </Animated.View>
 
-        {/* Podium - Ordre: 2e, 1er, 3e pour effet visuel */}
-        <View style={styles.podiumContainer}>
-          {topThree.length > 1 && renderPodiumPlayer(topThree[1], 1, 1)}
-          {topThree.length > 0 && renderPodiumPlayer(topThree[0], 0, 0)}
-          {topThree.length > 2 && renderPodiumPlayer(topThree[2], 2, 2)}
+        {/* Podium Centré */}
+        <View style={styles.podiumWrapper}>
+          <View style={styles.podiumContainer}>
+            {/* Ordre visuel : 2, 1, 3 */}
+            {topThree[1] && <PodiumItem player={topThree[1]} rank={1} animValue={podiumAnims[1]} />}
+            {topThree[0] && <PodiumItem player={topThree[0]} rank={0} animValue={podiumAnims[0]} />}
+            {topThree[2] && <PodiumItem player={topThree[2]} rank={2} animValue={podiumAnims[2]} />}
+          </View>
         </View>
 
-        {/* Autres joueurs */}
+        {/* Liste des autres joueurs (Glassmorphism style) */}
         {others.length > 0 && (
-          <Animated.View style={[styles.othersList, { opacity: listAnim }]}>
-            <Text style={styles.othersTitle}>AUTRES JOUEURS</Text>
+          <Animated.View style={[styles.listContainer, { opacity: listAnim, transform: [{ translateY: listAnim.interpolate({ inputRange: [0, 1], outputRange: [50, 0] }) }] }]}>
+            <Text style={styles.listHeader}>CLASSEMENT SUIVANT</Text>
             {others.map((player, index) => (
-              <View key={index} style={styles.otherPlayerRow}>
-                <Text style={styles.otherRank}>#{index + 4}</Text>
-                <View style={[styles.otherAvatar, { backgroundColor: player.avatar.color }]}>
-                  <Text style={styles.otherEmoji}>{player.avatar.emoji}</Text>
+              <View key={index} style={styles.listItem}>
+                <Text style={styles.listRank}>#{index + 4}</Text>
+                <View style={[styles.listAvatar, { backgroundColor: player.avatar.color }]}>
+                  {player.avatar.image ? (
+                    <Image source={{ uri: player.avatar.image }} style={styles.avatarImageSmall} />
+                  ) : (
+                    <Text style={{ fontSize: 16 }}>{player.avatar.emoji}</Text>
+                  )}
                 </View>
-                <View style={styles.otherInfo}>
-                  <Text style={styles.otherName}>{player.name}</Text>
-                  <Text style={styles.otherScore}>{player.score} pts</Text>
-                </View>
+                <Text style={styles.listName} numberOfLines={1}>{player.name}</Text>
+                <Text style={styles.listScore}>{player.score} pts</Text>
               </View>
             ))}
           </Animated.View>
         )}
-
-        {/* Boutons d'action */}
-        <Animated.View style={[styles.actions, { opacity: fadeAnim }]}>
-          <TouchableOpacity 
-            style={styles.replayButton} 
-            onPress={handleReplay}
-            activeOpacity={0.8}
-          >
-            <LinearGradient
-              colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]}
-              style={styles.buttonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Ionicons name="refresh" size={20} color={COLORS.TEXT_PRIMARY} />
-              <Text style={styles.buttonText}>REJOUER</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          <TouchableOpacity 
-            style={styles.menuButton} 
-            onPress={handleBackToMenu}
-            activeOpacity={0.8}
-          >
-            <View style={styles.menuButtonInner}>
-              <Ionicons name="home" size={20} color={COLORS.TEXT_PRIMARY} />
-              <Text style={styles.buttonText}>MENU</Text>
-            </View>
-          </TouchableOpacity>
-        </Animated.View>
-
-        <View style={{ height: 20 }} />
+        
+        {/* Espace pour les boutons flottants */}
+        <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* Boutons Flottants en bas (Fixed) */}
+      <Animated.View style={[styles.bottomControls, { opacity: fadeAnim }]}>
+        <TouchableOpacity style={[styles.btn, styles.btnSecondary]} onPress={handleMenu}>
+          <Ionicons name="home" size={20} color="#FFF" />
+        </TouchableOpacity>
+        
+        <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleReplay}>
+          <Text style={styles.btnText}>REJOUER</Text>
+          <Ionicons name="refresh" size={20} color="#000" />
+        </TouchableOpacity>
+      </Animated.View>
     </View>
   );
 }
@@ -343,210 +200,215 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#121212',
   },
-  confettiContainer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1,
-    pointerEvents: 'none',
-  },
-  confetti: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+  scrollContent: {
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    paddingBottom: 40,
+    alignItems: 'center', // Vital pour le centrage global
   },
   header: {
     alignItems: 'center',
-    paddingTop: 40,
-    paddingBottom: 16,
+    marginBottom: 40,
   },
   title: {
-    fontSize: 26,
+    fontSize: 32,
     fontWeight: '900',
-    color: '#FFFFFF',
-    marginTop: 12,
-    letterSpacing: 1.5,
-    textShadowColor: 'rgba(29, 185, 84, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 10,
+    color: '#FFF',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   subtitle: {
     fontSize: 14,
-    color: '#B3B3B3',
-    marginTop: 6,
-    fontWeight: '600',
+    color: 'rgba(255,255,255,0.6)',
+    marginTop: 5,
+  },
+  
+  // --- PODIUM STYLES ---
+  podiumWrapper: {
+    width: '100%',
+    alignItems: 'center', // Assure que le bloc podium est centré dans l'écran
+    marginBottom: 30,
   },
   podiumContainer: {
     flexDirection: 'row',
-    justifyContent: 'center',
     alignItems: 'flex-end',
-    paddingHorizontal: 16,
-    paddingVertical: 20,
-    gap: 12,
+    justifyContent: 'center', // Colle les barres au centre
+    width: PODIUM_WIDTH,
+    height: 300, // Hauteur fixe pour éviter les sauts
   },
   podiumSlot: {
+    width: SLOT_WIDTH, // Largeur fixe : 1/3 de l'espace alloué
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'flex-end',
   },
-  podiumAvatar: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
+  avatarContainer: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  avatarCircle: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
-    borderWidth: 3,
-    borderColor: COLORS.TEXT_PRIMARY,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+    overflow: 'hidden', // Pour l'image
   },
-  podiumEmoji: {
-    fontSize: 32,
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
-  medalBadge: {
+  avatarEmoji: {
+    fontSize: 28,
+  },
+  rankBadge: {
     position: 'absolute',
-    bottom: -4,
-    right: -4,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    borderRadius: 13,
-    width: 26,
-    height: 26,
+    bottom: -5,
+    backgroundColor: '#FFF',
+    borderRadius: 10,
+    width: 20,
+    height: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.TEXT_PRIMARY,
+  },
+  rankText: {
+    fontSize: 10,
+    fontWeight: 'bold',
+    color: '#000',
+  },
+  playerName: {
+    color: '#FFF',
+    fontWeight: '700',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
+    width: '100%',
+  },
+  playerScore: {
+    fontWeight: '900',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  podiumBar: {
+    width: '90%', // Laisse un petit espace entre les barres
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 12,
+    justifyContent: 'flex-start',
+    alignItems: 'center',
+    paddingTop: 10,
+    // AJOUTÉ: Permet de placer le rang en absolu
+    position: 'relative', 
+    overflow: 'hidden', 
   },
   medalIcon: {
+    fontSize: 20,
+    zIndex: 2, // S'assure que la médaille est au-dessus du grand nombre
+  },
+  // NOUVEAU STYLE
+  pedestalRankLarge: {
+    position: 'absolute',
+    fontSize: 80, // Très grand !
+    fontWeight: '900',
+    color: 'rgba(255,255,255,0.1)', // Semi-transparent
+    top: '30%', 
+    zIndex: 1, // Sous le medalIcon
+  },
+
+  // --- LISTE STYLES ---
+  listContainer: {
+    width: width * 0.9,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 20,
+    padding: 20,
+  },
+  listHeader: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginBottom: 15,
+    textAlign: 'center',
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    padding: 12,
+    borderRadius: 12,
+  },
+  listRank: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    width: 30,
     fontSize: 14,
   },
-  podiumName: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    textAlign: 'center',
-    marginBottom: 4,
-  },
-  scoreContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 6,
-  },
-  podiumScore: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#1DB954',
-  },
-  ptsLabel: {
-    fontSize: 11,
-    color: '#FFFFFF',
-    marginLeft: 2,
-    fontWeight: '600',
-  },
-  pedestal: {
-    width: '100%',
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  pedestalRank: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: 'rgba(255,255,255,0.95)',
-    textShadowColor: 'rgba(0, 0, 0, 0.7)',
-    textShadowOffset: { width: 2, height: 2 },
-    textShadowRadius: 5,
-  },
-  othersList: {
-    paddingHorizontal: 20,
-    marginTop: 16,
-  },
-  othersTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    color: '#B3B3B3',
-    textAlign: 'center',
-    marginBottom: 12,
-    letterSpacing: 1,
-  },
-  otherPlayerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(40, 40, 40, 0.9)',
-    padding: 12,
-    borderRadius: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(29, 185, 84, 0.2)',
-  },
-  otherRank: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#FFFFFF',
+  listAvatar: {
     width: 36,
-    textAlign: 'center',
-  },
-  otherAvatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 12,
-    borderWidth: 2,
+    overflow: 'hidden',
+  },
+  avatarImageSmall: {
+    width: '100%',
+    height: '100%',
+  },
+  listName: {
+    flex: 1,
+    color: '#FFF',
+    fontWeight: '600',
+    fontSize: 15,
+  },
+  listScore: {
+    color: '#1DB954',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+
+  // --- BUTTONS STYLES ---
+  bottomControls: {
+    position: 'absolute',
+    bottom: 40,
+    left: 20,
+    right: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 15,
+  },
+  btn: {
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+    elevation: 8,
+  },
+  btnSecondary: {
+    width: 56, // Bouton rond pour Menu
+    backgroundColor: '#333',
+    borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
   },
-  otherEmoji: {
-    fontSize: 20,
+  btnPrimary: {
+    flex: 1, // Prend le reste de la place
+    backgroundColor: '#1DB954',
   },
-  otherInfo: {
-    flex: 1,
-  },
-  otherName: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  otherScore: {
-    fontSize: 13,
-    color: '#1DB954',
-    fontWeight: '600',
-    marginTop: 2,
-  },
-  actions: {
-    paddingHorizontal: 20,
-    marginTop: 24,
-  },
-  replayButton: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 12,
-  },
-  buttonGradient: {
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  menuButton: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(40, 40, 40, 0.8)',
-    borderWidth: 2,
-    borderColor: '#1DB954',
-  },
-  menuButtonInner: {
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  buttonText: {
-    fontSize: 15,
+  btnText: {
+    color: '#000',
     fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 1,
+    fontSize: 16,
+    marginRight: 8,
+    letterSpacing: 0.5,
   },
 });
