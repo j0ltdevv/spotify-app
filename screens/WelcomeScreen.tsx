@@ -193,7 +193,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
                 setShowDeezerModal(true);
               }}
             >
-              <Image source={require('../assets/deezer-logo.jpg')} style={{ width: 24, height: 24, marginRight: 10 }} resizeMode="contain" />
+              <FontAwesome5 name="deezer" size={24} color="white" style={{ marginRight: 10 }} />
               <Text style={styles.deezerButtonText}>CONTINUER AVEC DEEZER</Text>
             </TouchableOpacity>
 
