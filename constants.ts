@@ -34,7 +34,7 @@ export const COLORS = {
 };
 
 export const GAME_CONFIG = {
-  MAX_ROUNDS: 5,
+  MAX_ROUNDS: 10,
   INITIAL_TIME: 15,
   BASE_SCORE: 500,
   TIME_BONUS_MULTIPLIER: 30,
@@ -69,6 +69,42 @@ export const MOCK_PLAYERS = [
   { id: '2', name: 'Julie', color: COLORS.ERROR_RED, emoji: '🎀' },
   { id: '3', name: 'Thomas', color: COLORS.INFO_BLUE, emoji: '🎸' },
   { id: '4', name: 'Léa', color: COLORS.PLAYER_COLORS.YELLOW, emoji: '✨' },
+];
+
+// Sous-modes pour le mode Aléatoire
+export const GAME_MODES = [
+  { 
+    key: 'NORMAL', 
+    label: 'Normal', 
+    rounds: 10,
+    description: '10 manches',
+    emoji: '🎯',
+    gradient: [COLORS.PLAYER_COLORS.PURPLE, '#C084FC'] as [string, string]
+  },
+  { 
+    key: 'FLASH', 
+    label: 'Flash', 
+    rounds: 5,
+    description: '5 manches',
+    emoji: '⚡',
+    gradient: [COLORS.GOLD, '#F39C12'] as [string, string]
+  },
+  { 
+    key: 'LONG', 
+    label: 'Long', 
+    rounds: 15,
+    description: '15 manches',
+    emoji: '🎮',
+    gradient: [COLORS.INFO_BLUE, '#6EDDD6'] as [string, string]
+  },
+  { 
+    key: 'MARATHON', 
+    label: 'Marathon', 
+    rounds: 30,
+    description: '30 manches',
+    emoji: '🏃',
+    gradient: [COLORS.ERROR_RED, COLORS.WARNING_ORANGE] as [string, string]
+  },
 ];
 
 export const CATEGORIES = [
