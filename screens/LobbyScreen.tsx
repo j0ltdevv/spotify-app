@@ -28,7 +28,7 @@ const { width } = Dimensions.get('window');
 export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const { accessToken, logout, firebaseUser } = useAuth();
   // Using real multiplayer data
-  const { players, roomCode, isHost, leaveGame, status, startNewGame, addToTrackPool } = useGame(); 
+  const { players, roomCode, isHost, leaveGame, status, startNewGame, addToTrackPool, addBots } = useGame(); 
   
   const { showToast } = useToast();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -338,9 +338,18 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
         <View style={styles.playersHeader}>
           <Text style={styles.playersHeaderText}>Joueurs</Text>
           {isHost && (
-            <View style={styles.adminBadge}>
-              <Ionicons name="shield-checkmark" color="#FFD700" size={14} />
-              <Text style={styles.adminBadgeText}>Admin</Text>
+            <View style={{flexDirection: 'row', gap: 8}}>
+                <TouchableOpacity onPress={() => {
+                    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    addBots();
+                }} style={styles.adminBadge}>
+                   <Ionicons name="add-circle" color="#FFD700" size={14} />
+                   <Text style={styles.adminBadgeText}>+ Bots</Text>
+                </TouchableOpacity>
+                <View style={styles.adminBadge}>
+                  <Ionicons name="shield-checkmark" color="#FFD700" size={14} />
+                  <Text style={styles.adminBadgeText}>Admin</Text>
+                </View>
             </View>
           )}
         </View>
