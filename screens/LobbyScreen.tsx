@@ -13,7 +13,7 @@ import { CATEGORIES, COLORS, GAME_MODES } from '../constants';
 import SafeContainer from '../components/SafeContainer';
 import UserService from '../services/UserService';
 import MusicService from '../services/MusicService'; // Added
-import { Player, Category } from '../types';
+import { Player, Category, SpotifyTrack } from '../types';
 import GlassCard from '../components/GlassCard';
 import PressableCard from '../components/PressableCard';
 import Logger from '../utils/logger';
@@ -44,18 +44,15 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const playlistName = route.params?.playlistName;
 
   // --- AUTO-SHARING MUSIC ---
-  // Dès qu'on arrive ou change de catégorie, on partage nos musiques si c'est pertinent
   useEffect(() => {
       const shareUserTracks = async () => {
-          // On ne partage que si on est loggé et que c'est une catégorie "Top" (pas une playlist fixe)
-          // Et seulement si on a un token Spotify
-          if (!accessToken || !selectedCategory.startsWith('TOP_') || isSharingTracks) return;
+          if (!accessToken || !selectedCategory.startsWith('TOP_') || isSharingTracks || !firebaseUser) return;
 
           try {
               setIsSharingTracks(true);
               console.log(`🎵 Préparation des musiques pour le pot commun (${selectedCategory})...`);
               
-              // 1. Récupérer mes tracks
+              // 1. Récupérer mes tracks (SpotifyTrack[])
               const tracks = await MusicService.fetchTracksByCategory({
                   accessToken,
                   category: selectedCategory,
@@ -63,10 +60,15 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
               });
 
               if (tracks.length > 0) {
+                  // 1.5 Taguer les tracks avec mon ID
+                  const taggedTracks: SpotifyTrack[] = tracks.map(t => ({
+                      ...t,
+                      correctPlayer: firebaseUser.uid
+                  }));
+
                   // 2. Les envoyer au pot commun
-                  await addToTrackPool(tracks);
+                  await addToTrackPool(taggedTracks);
                   console.log("📤 Musiques partagées avec succès !");
-                  // Feedback visuel discret (optionnel)
               }
           } catch (error) {
               console.error("Erreur partage musique:", error);

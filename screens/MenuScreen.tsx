@@ -105,10 +105,17 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
     try {
       setIsLoading(true);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      await createGame();
-      // La navigation est gérée par le context ou le useEffect qui surveille roomCode
+      
+      // Timeout de sécurité pour éviter le blocage infini
+      const timeoutPromise = new Promise((_, reject) => 
+         setTimeout(() => reject(new Error("Timeout creating game")), 8000)
+      );
+      
+      await Promise.race([createGame(), timeoutPromise]);
+      
+      // La navigation sera déclenchée par le useEffect surveillant roomCode
     } catch (error) {
-      console.error(error);
+      console.error('Create Game Error:', error);
       showToast("Erreur lors de la création", "error");
       setIsLoading(false);
     }

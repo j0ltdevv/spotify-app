@@ -497,7 +497,7 @@ class MusicService {
       album: track.album?.name || '',
       albumImage: track.album?.images?.[0]?.url || '',
       preview_url: audioUrl,
-      correctPlayer: 'Moi',
+      correctPlayer: track.correctPlayer || '?', // Use propagated ID or '?' as fallback
       lastPlayed: track.lastPlayed || null,
       source
     };
