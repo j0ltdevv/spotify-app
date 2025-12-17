@@ -27,7 +27,7 @@ const { width } = Dimensions.get('window');
 
 export default function GameScreen(props: GameScreenProps) {
   const { navigation, route } = props;
-  const { isHost, setGameTrack, currentTrack: sharedTrack, trackPool, players } = useGame(); // Multiplayer hooks
+  const { isHost, setGameTrack, currentTrack: sharedTrack, trackPool, players, leaveGame } = useGame(); // Multiplayer hooks
   // Récupération des paramètres avec valeurs par défaut
   const { accessToken: rawAccessToken } = useAuth();
   const { showToast } = useToast();
@@ -653,6 +653,9 @@ export default function GameScreen(props: GameScreenProps) {
             // Arrêter complètement le son
             await stopSound(true);
             setIsPlaying(false);
+            
+            // Quitter la session de jeu (nettoyer le contexte)
+            await leaveGame();
             
             // Retourner au menu principal
             navigation.replace('Menu', {});
