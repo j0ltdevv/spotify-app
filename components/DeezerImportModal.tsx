@@ -198,7 +198,7 @@ const DeezerImportModal: React.FC<DeezerImportModalProps> = ({ visible, onClose,
         
         <TouchableOpacity style={styles.searchButton} onPress={handleSearch} activeOpacity={0.8}>
           <Text style={styles.searchButtonText}>IMPORTER PLAYLIST</Text>
-          <Ionicons name="arrow-forward" size={20} color="black" />
+          <Ionicons name="arrow-forward" size={20} color="white" />
         </TouchableOpacity>
       </View>
     );
@@ -214,8 +214,8 @@ const DeezerImportModal: React.FC<DeezerImportModalProps> = ({ visible, onClose,
       <View style={styles.overlay}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Import Deezer (Public)</Text>
-            <TouchableOpacity onPress={handleClose}>
+            <Text style={styles.modalTitle}>Sélectionne ta playlist > Partager > Copier le lien</Text>
+            <TouchableOpacity onPress={handleClose} style={{ marginRight: -10 }}>
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
           </View>
@@ -253,8 +253,10 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     color: 'white',
-    fontSize: 20,
+    fontSize: 14, // Réduit pour tenir sur une ligne
     fontWeight: 'bold',
+    flex: 1, // Prend l'espace disponible
+    marginRight: 10, // Marge avec la croix
   },
   // Input Styles
   inputContainer: {
@@ -281,20 +283,20 @@ const styles = StyleSheet.create({
     marginLeft: 5,
   },
   searchButton: {
-    backgroundColor: COLORS.SPOTIFY_GREEN, // Vert Néon demandé
+    backgroundColor: COLORS.DEEZER_PURPLE, // Violet Deezer demandé
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
     paddingVertical: 15,
     borderRadius: 30,
-    shadowColor: COLORS.SPOTIFY_GREEN,
+    shadowColor: COLORS.DEEZER_PURPLE,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 10,
     elevation: 5,
   },
   searchButtonText: {
-    color: 'black',
+    color: 'white',
     fontWeight: 'bold',
     fontSize: 16,
     marginRight: 10,
