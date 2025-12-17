@@ -12,6 +12,7 @@ import * as Haptics from 'expo-haptics';
 import { CATEGORIES, COLORS } from '../constants';
 import SafeContainer from '../components/SafeContainer';
 import UserService from '../services/UserService';
+import MusicService from '../services/MusicService'; // Added
 import { Player, Category } from '../types';
 import GlassCard from '../components/GlassCard';
 import PressableCard from '../components/PressableCard';
@@ -27,7 +28,7 @@ const { width } = Dimensions.get('window');
 export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const { accessToken, logout, firebaseUser } = useAuth();
   // Using real multiplayer data
-  const { players, roomCode, isHost, leaveGame, status, startNewGame } = useGame(); 
+  const { players, roomCode, isHost, leaveGame, status, startNewGame, addToTrackPool } = useGame(); 
   
   const { showToast } = useToast();
   const scrollViewRef = useRef<ScrollView>(null);
@@ -35,10 +36,51 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>(CATEGORIES[0].key);
   // Remove isAdmin state, use isHost from context
   const [isLoadingProfile, setIsLoadingProfile] = useState(false); // No longer needed as much
-  
+  const [isSharingTracks, setIsSharingTracks] = useState(false); // Pour éviter le spam
+
   // Deezer Import Check
   const deezerTracks = route.params?.tracks;
   const playlistName = route.params?.playlistName;
+
+  // --- AUTO-SHARING MUSIC ---
+  // Dès qu'on arrive ou change de catégorie, on partage nos musiques si c'est pertinent
+  useEffect(() => {
+      const shareUserTracks = async () => {
+          // On ne partage que si on est loggé et que c'est une catégorie "Top" (pas une playlist fixe)
+          // Et seulement si on a un token Spotify
+          if (!accessToken || !selectedCategory.startsWith('TOP_') || isSharingTracks) return;
+
+          try {
+              setIsSharingTracks(true);
+              console.log(`🎵 Préparation des musiques pour le pot commun (${selectedCategory})...`);
+              
+              // 1. Récupérer mes tracks
+              const tracks = await MusicService.fetchTracksByCategory({
+                  accessToken,
+                  category: selectedCategory,
+                  limit: 20 // On en prend 20 chacun
+              });
+
+              if (tracks.length > 0) {
+                  // 2. Les envoyer au pot commun
+                  await addToTrackPool(tracks);
+                  console.log("📤 Musiques partagées avec succès !");
+                  // Feedback visuel discret (optionnel)
+              }
+          } catch (error) {
+              console.error("Erreur partage musique:", error);
+          } finally {
+              setIsSharingTracks(false);
+          }
+      };
+
+      // Petit délai pour laisser le temps à la connexion de se stabiliser
+      const timer = setTimeout(() => {
+          shareUserTracks();
+      }, 1000);
+
+      return () => clearTimeout(timer);
+  }, [selectedCategory, accessToken]); // Re-run si on change de catégorie
 
   // Effect to navigate when game starts
   useEffect(() => {

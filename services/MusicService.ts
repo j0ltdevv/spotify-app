@@ -326,7 +326,67 @@ class MusicService {
   }
 
   /**
+   * Vérifie un seul track pour voir s'il est jouable
+   */
+  private async checkSingleTrack(track: SpotifyTrack): Promise<PlayableTrackResult | null> {
+    try {
+      const artistName = track.artists?.[0]?.name || '';
+      let audioUrl: string | null = null;
+
+      // VÉRIFIER LE CACHE D'ABORD
+      const cached = this.getCachedPreview(track.id);
+      if (cached) {
+        console.log(`   💾 [CACHE] ${track.name} trouvé en cache (${cached.source})`);
+        return {
+          track: this.createGameTrack(track, cached.url, cached.source),
+          success: true
+        };
+      }
+
+      // PRIORITÉ 1: iTunes
+      audioUrl = await fetchAudioFromItunes(track.name, artistName);
+      if (audioUrl) {
+        this.cachePreview(track.id, audioUrl, 'iTunes');
+        console.log(`   🍎 [ITUNES] ${track.name} trouvé !`);
+        return {
+          track: this.createGameTrack(track, audioUrl, 'iTunes'),
+          success: true
+        };
+      }
+
+      // PRIORITÉ 2: Deezer
+      audioUrl = await fetchAudioFromDeezer(track.name, artistName);
+      if (audioUrl) {
+        this.cachePreview(track.id, audioUrl, 'Deezer');
+        console.log(`   🎵 [DEEZER] ${track.name} trouvé !`);
+        return {
+          track: this.createGameTrack(track, audioUrl, 'Deezer'),
+          success: true
+        };
+      }
+
+      // PRIORITÉ 3: Spotify Preview
+      if (track.preview_url) {
+        this.cachePreview(track.id, track.preview_url, 'Spotify');
+        console.log(`   🟢 [SPOTIFY] ${track.name} trouvé !`);
+        return {
+          track: this.createGameTrack(track, track.preview_url, 'Spotify'),
+          success: true
+        };
+      }
+
+      // Échec pour ce track
+      return null;
+
+    } catch (error) {
+      console.warn(`   ⚠️ Erreur check ${track.name}: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Trouve un track jouable avec preview audio (iTunes prioritaire)
+   * VERSION OPTIMISÉE : Recherche par lots parallèles
    */
   public async findPlayableTrack(
     tracks: SpotifyTrack[],
@@ -340,127 +400,51 @@ class MusicService {
       return prefetched;
     }
 
-    console.log(`\n🔍 Recherche d'un track jouable parmi ${tracks.length} tracks`);
-    console.log(`   🔒 ${excludedTrackIds.length} tracks exclus`);
-    if (degradedMode) {
-      console.log(`   🔄 MODE DÉGRADÉ ACTIVÉ (seuils abaissés)`);
-    }
-
+    console.log(`\n🔍 Recherche RAPIDE d'un track jouable parmi ${tracks.length} tracks`);
+    
     // Mélanger et filtrer les tracks déjà joués
     const shuffledTracks = shuffleArray(tracks);
     const availableTracks = shuffledTracks.filter(track => 
       !excludedTrackIds.includes(track.id)
     );
 
-    console.log(`   ✅ ${availableTracks.length} tracks disponibles après filtrage`);
-
     if (availableTracks.length === 0) {
-      return {
-        track: null,
-        success: false,
-        error: 'Aucun track disponible'
-      };
+      return { track: null, success: false, error: 'Aucun track disponible' };
     }
 
-    // Recherche d'un track avec preview
-    for (let i = 0; i < Math.min(maxAttempts, availableTracks.length); i++) {
-      const track = availableTracks[i];
+    // --- RECHERCHE PAR BATCHES (PARALLÈLE) ---
+    const BATCH_SIZE = 3; // Tester 3 musiques en même temps
+    const TOTAL_LIMIT = Math.min(maxAttempts, availableTracks.length);
+    
+    for (let i = 0; i < TOTAL_LIMIT; i += BATCH_SIZE) {
+      const batch = availableTracks.slice(i, i + BATCH_SIZE);
+      console.log(`\n🚀 Lancement du batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.length} tracks)...`);
+      
+      // Lancer les vérifications en parallèle
+      const promises = batch.map(track => this.checkSingleTrack(track));
+      const results = await Promise.all(promises);
 
-      console.log(`\n${'='.repeat(80)}`);
-      console.log(`🔍 TENTATIVE ${i + 1}/${maxAttempts}`);
-      console.log(`📀 Track: "${track.name}"`);
-      console.log(`🎤 Artiste: ${track.artists?.[0]?.name}`);
-      console.log(`💿 Album: ${track.album?.name || 'N/A'}`);
-      console.log(`🆔 Spotify ID: ${track.id}`);
-      console.log(`${'='.repeat(80)}`);
-
-      try {
-        const artistName = track.artists?.[0]?.name || '';
-        let audioUrl: string | null = null;
-        let source: 'iTunes' | 'Spotify' | 'Deezer' = 'iTunes';
-
-        // VÉRIFIER LE CACHE D'ABORD
-        const cached = this.getCachedPreview(track.id);
-        if (cached) {
-          console.log(`\n🎉 🎉 🎉 SUCCÈS (Cache) ! 🎉 🎉 🎉`);
-          console.log(`   Source: ${cached.source} (depuis le cache)`);
-          return {
-            track: this.createGameTrack(track, cached.url, cached.source),
-            success: true
-          };
-        }
-
-        // PRIORITÉ 1: iTunes (meilleur matching, moins de désynchronisation)
-        console.log(`\n🍎 ═══════ PRIORITÉ 1 : iTunes ═══════`);
-        audioUrl = await fetchAudioFromItunes(track.name, artistName);
-
-        if (audioUrl) {
-          this.cachePreview(track.id, audioUrl, 'iTunes');
-          console.log(`\n🎉 🎉 🎉 SUCCÈS iTunes ! 🎉 🎉 🎉`);
-          console.log(`   Source: iTunes`);
-          console.log(`   URL: ${audioUrl.substring(0, 60)}...`);
-          return {
-            track: this.createGameTrack(track, audioUrl, 'iTunes'),
-            success: true
-          };
-        }
-
-        // PRIORITÉ 2: Deezer (excellent catalogue, API gratuite)
-        console.log(`\n🎵 ═══════ PRIORITÉ 2 : Deezer ═══════`);
-        console.log(`   iTunes échec, tentative avec Deezer...`);
-        audioUrl = await fetchAudioFromDeezer(track.name, artistName);
-
-        if (audioUrl) {
-          this.cachePreview(track.id, audioUrl, 'Deezer');
-          console.log(`\n🎉 🎉 🎉 SUCCÈS Deezer ! 🎉 🎉 🎉`);
-          console.log(`   Source: Deezer`);
-          console.log(`   URL: ${audioUrl.substring(0, 60)}...`);
-          return {
-            track: this.createGameTrack(track, audioUrl, 'Deezer'),
-            success: true
-          };
-        }
-
-        // PRIORITÉ 3: Spotify preview (fallback de dernière chance)
-        console.log(`\n🎵 ═══════ PRIORITÉ 3 : Spotify Preview ═══════`);
-        if (track.preview_url) {
-          this.cachePreview(track.id, track.preview_url, 'Spotify');
-          console.log(`   ✅ Spotify preview disponible !`);
-          console.log(`\n🎉 🎉 🎉 SUCCÈS Spotify ! 🎉 🎉 🎉`);
-          console.log(`   Source: Spotify`);
-          console.log(`   URL: ${track.preview_url.substring(0, 60)}...`);
-          return {
-            track: this.createGameTrack(track, track.preview_url, 'Spotify'),
-            success: true
-          };
-        }
-
-        console.log(`   ❌ Pas de preview Spotify disponible`);
-        console.log(`\n❌ ═══════ ÉCHEC TOTAL - Aucune source trouvée ═══════`);
-        console.log(`   ⏭️  Passage au titre suivant...`);
-      } catch (error) {
-        console.warn(`\n⚠️ ═══════ ERREUR TECHNIQUE ═══════`);
-        console.warn(`   ${error}`);
-        console.warn(`   ⏭️  Passage au titre suivant...`);
+      // Trouver le premier succès dans le batch
+      const winner = results.find(res => res && res.success);
+      
+      if (winner) {
+        console.log(`\n🏆 GAGNANT TROUVÉ dans le batch !`);
+        return winner;
       }
+      
+      console.log(`   ❌ Aucun succès dans ce batch, on continue...`);
     }
 
-    // MODE DÉGRADÉ : Si échec et pas encore en mode dégradé, réessayer avec paramètres plus permissifs
+    // MODE DÉGRADÉ
     if (!degradedMode) {
-      console.log(`\n🔄 ═══════ ACTIVATION DU MODE DÉGRADÉ ═══════`);
-      console.log(`   Nouvel essai avec plus de tentatives et paramètres assouplis`);
-      return await this.findPlayableTrack(
-        tracks, 
-        excludedTrackIds, 
-        Math.min(20, availableTracks.length),
-        true // Mode dégradé activé
-      );
+      console.log(`\n🔄 Mode dégradé activé...`);
+      return await this.findPlayableTrack(tracks, excludedTrackIds, 30, true);
     }
 
     return {
       track: null,
       success: false,
-      error: 'Aucun extrait audio trouvé même en mode dégradé'
+      error: 'Aucun extrait audio trouvé'
     };
   }
 

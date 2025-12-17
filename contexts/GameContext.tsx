@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, GAME_CONFIG } from '../constants';
-import { PlayerScores, Player } from '../types';
+import { GameTrack, PlayerScores, Player } from '../types';
 import { useAuth } from './AuthContext';
 import { 
   getFirestore, 
@@ -20,6 +20,7 @@ import {
 } from 'firebase/firestore'; 
 import { app } from '../services/FirebaseService';
 import UserService from '../services/UserService'; // To get user profile info
+import { getBestImage, getRandomEmoji, getRandomColor } from '../utils/userUtils'; // Added utils
 
 interface GameState {
   currentRound: number;
@@ -34,6 +35,8 @@ interface GameState {
   hostId?: string;
   players: Player[];
   status: 'waiting' | 'playing' | 'finished';
+  currentTrack?: any;
+  trackPool: GameTrack[]; // Le pot commun de musiques
 }
 
 interface GameContextType extends GameState {
@@ -41,11 +44,13 @@ interface GameContextType extends GameState {
   nextRound: () => void;
   updatePlayerScore: (playerId: string, score: number) => void;
   addPlayedTrack: (trackId: string) => void;
+  setGameTrack: (track: any) => void;
+  addToTrackPool: (tracks: GameTrack[]) => Promise<void>; // Nouvelle fonction
   resetGame: () => Promise<void>;
   saveGameState: () => Promise<void>;
   loadGameState: () => Promise<void>;
   // Multiplayer methods
-  createGame: () => Promise<string>; // Returns room code
+  createGame: () => Promise<string>;
   joinGame: (code: string) => Promise<boolean>;
   leaveGame: () => Promise<void>;
   isHost: boolean;
@@ -64,6 +69,8 @@ const initialGameState: GameState = {
   hostId: undefined,
   players: [],
   status: 'waiting',
+  currentTrack: null, // Firebase doesn't like undefined
+  trackPool: [], // Initial empty pool
 };
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
@@ -87,7 +94,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     let unsubscribe: () => void;
 
-    if (!isAuthLoading && activeGameDocId) {
+    // On n'écoute que si l'auth est chargée, qu'on a un ID de jeu, ET qu'on est connecté
+    if (!isAuthLoading && activeGameDocId && firebaseUser) {
       console.log(`🎧 Start listening to game: ${activeGameDocId}`);
       const gameDocRef = doc(db, 'games', activeGameDocId);
       
@@ -111,7 +119,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setActiveGameDocId(null);
         }
       }, (error) => {
-        console.error('❌ Firestore listener error:', error);
+        // Ignorer l'erreur de permission si c'est dû à une déconnexion en cours
+        if (error.code === 'permission-denied') {
+            console.log('🔒 Permission denied (probablement déconnecté)');
+        } else {
+            console.error('❌ Firestore listener error:', error);
+        }
       });
     }
 
@@ -121,7 +134,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.log('🔌 Listener disconnected');
       }
     };
-  }, [activeGameDocId, isAuthLoading]);
+  }, [activeGameDocId, isAuthLoading, firebaseUser]); // Ajout de firebaseUser aux dépendances
 
   // 2. CREATE GAME (HOST)
   const createGame = async (): Promise<string> => {
@@ -138,16 +151,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
        const userProfile = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
        if (userProfile.success && userProfile.user) {
            hostName = userProfile.user.display_name;
-           hostImage = userProfile.user.images?.[0]?.url;
+           hostImage = getBestImage(userProfile.user.images) || undefined;
        }
     }
 
     const hostPlayer: Player = {
         id: firebaseUser.uid,
         name: hostName,
-        image: hostImage || undefined, // undefined is problematic for Firestore if not ignored, let's use null or omit if strict
-        color: '#1DB954', // Spotify Green
-        emoji: '👑'
+        image: hostImage || undefined,
+        color: getRandomColor(),
+        emoji: getRandomEmoji()
     };
 
     // Firestore clean object
@@ -202,16 +215,16 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
              const userProfile = await UserService.fetchUserProfile(accessToken, firebaseUser.uid);
              if (userProfile.success && userProfile.user) {
                  guestName = userProfile.user.display_name;
-                 guestImage = userProfile.user.images?.[0]?.url;
+                 guestImage = getBestImage(userProfile.user.images) || undefined;
              }
         }
 
         const newPlayer: Player = {
             id: firebaseUser.uid,
             name: guestName,
-            image: guestImage,
-            color: '#'+(Math.random()*0xFFFFFF<<0).toString(16).padStart(6, '0'), // Random color
-            emoji: '👋'
+            image: guestImage || undefined,
+            color: getRandomColor(),
+            emoji: getRandomEmoji()
         };
 
         // Clean for Firestore
@@ -309,6 +322,33 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const setGameTrack = (track: any) => {
+      if (firebaseUser?.uid !== gameState.hostId) return; // Only host sets track
+      if (activeGameDocId) {
+          updateDoc(doc(db, 'games', activeGameDocId), {
+              currentTrack: track
+          });
+      }
+  };
+
+  const addToTrackPool = async (tracks: GameTrack[]) => {
+    if (!activeGameDocId) return;
+    try {
+        // Limiter pour éviter de surcharger Firestore (ex: max 20 par personne)
+        const limitedTracks = tracks.slice(0, 20);
+        
+        // Clean tracks to ensure no undefined values
+        const cleanTracks = limitedTracks.map(t => JSON.parse(JSON.stringify(t)));
+
+        await updateDoc(doc(db, 'games', activeGameDocId), {
+            trackPool: arrayUnion(...cleanTracks)
+        });
+        console.log(`✅ ${cleanTracks.length} tracks added to pool`);
+    } catch (error) {
+        console.error("Error adding to pool:", error);
+    }
+  };
+
   const resetGame = async () => {
      await leaveGame();
   };
@@ -333,6 +373,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     nextRound,
     updatePlayerScore,
     addPlayedTrack,
+    setGameTrack, // Added
+    addToTrackPool,
     resetGame,
     saveGameState,
     loadGameState,

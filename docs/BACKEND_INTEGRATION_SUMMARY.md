@@ -211,7 +211,11 @@ const tracks = await MusicService.getTopTracks(
 
 ## 📝 Prochaines Étapes
 
-### 1️⃣ **Déployer le Backend** (30 min)
+### 1️⃣ **Firebase Configuré**
+
+Le client mobile est maintenant configuré pour utiliser Firebase, avec les variables d'environnement (`.env`) correctement mises en place.
+
+### 2️⃣ **Déployer le Backend** (30 min)
 
 Suivre le guide : **BACKEND_SETUP_GUIDE.md**
 
@@ -419,7 +423,8 @@ console.log('Response:', response);
 - [ ] MongoDB Atlas configuré
 - [ ] Redis Cloud configuré (optionnel)
 - [ ] Railway projet créé
-- [ ] Variables d'environnement configurées
+- [x] Variables d'environnement configurées
+- [x] Firebase configuré (variables d'environnement)
 - [ ] Backend déployé
 - [ ] URL publique fonctionnelle
 

@@ -25,7 +25,17 @@ const firebaseConfig = {
   measurementId: FIREBASE_MEASUREMENT_ID
 };
 
+console.log('🔥 Firebase Config Loaded:', {
+  apiKey: firebaseConfig.apiKey ? `${firebaseConfig.apiKey.substring(0, 5)}...` : 'UNDEFINED',
+  projectId: firebaseConfig.projectId,
+  authDomain: firebaseConfig.authDomain
+});
+
 // Initialize Firebase
+if (!firebaseConfig.apiKey) {
+  console.error('❌ Firebase Configuration Error: API Key is missing. Check your .env file and restart the bundler with --clear.');
+}
+
 const app = initializeApp(firebaseConfig);
 
 // Initialize Auth with persistence
