@@ -5,7 +5,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Activit
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { makeRedirectUri, useAuthRequest, ResponseType, exchangeCodeAsync } from 'expo-auth-session';
 import { RootStackParamList } from '../App';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, FontAwesome5, Fontisto } from '@expo/vector-icons';
 import { SPOTIFY_CONFIG, API_ENDPOINTS } from '../config';
 import { COLORS, ANIMATION_CONFIG } from '../constants';
 import Logger from '../utils/logger';
@@ -157,7 +157,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         />
         {/* Contenu central: Texte + Bouton */}
         <View style={styles.content}>
-          <Animated.View style={{ alignItems: 'center', opacity: fadeAnim, transform: [{ translateY: floatAnim }] }}>
+          <Animated.View style={[{ alignItems: 'center', opacity: fadeAnim, transform: [{ translateY: floatAnim }] }, { marginTop: 50 }]}>
             <Animated.Text style={styles.promptText}>Connecte ton compte</Animated.Text>
             
             <TouchableOpacity
@@ -176,7 +176,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
                 </>
               ) : (
                 <>
-                  <Ionicons name="musical-notes" size={24} color="white" style={{ marginRight: 10 }} />
+                  <FontAwesome5 name="spotify" size={24} color="white" style={{ marginRight: 10 }} />
                   <Text style={styles.loginButtonText}>
                     {isLoading ? 'CHARGEMENT...' : 'CONTINUER AVEC SPOTIFY'}
                   </Text>
@@ -193,8 +193,8 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
                 setShowDeezerModal(true);
               }}
             >
-              <Ionicons name="radio-outline" size={20} color={COLORS.TEXT_PRIMARY} style={{ marginRight: 10 }} />
-              <Text style={styles.deezerButtonText}>JOUER AVEC DEEZER (BETA)</Text>
+              <Image source={require('../assets/deezer-logo.jpg')} style={{ width: 24, height: 24, marginRight: 10 }} resizeMode="contain" />
+              <Text style={styles.deezerButtonText}>CONTINUER AVEC DEEZER</Text>
             </TouchableOpacity>
 
           </Animated.View>
@@ -233,8 +233,9 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
+    paddingBottom: 80,
   },
   promptText: {
     color: 'white',
@@ -310,9 +311,9 @@ const styles = StyleSheet.create({
   },
   logo: {
     position: 'absolute',
-    top: 50,
-    width: width,
-    height: width * (1000 / 1732),
+    top: 100,
+    width: width * 1.5,
+    height: width * 1.5 * (1000 / 1732),
     alignSelf: 'center',
   },
 });
