@@ -94,6 +94,17 @@ export default function GameScreen(props: GameScreenProps) {
     }, [])
   );
 
+  // Calcul dynamique de la taille des points de progression
+  const getProgressDotSize = () => {
+    if (maxRounds <= 5) return { size: 12, gap: 12, completedSize: 14, currentSize: 16 };
+    if (maxRounds <= 8) return { size: 10, gap: 10, completedSize: 12, currentSize: 14 };
+    if (maxRounds <= 12) return { size: 8, gap: 8, completedSize: 10, currentSize: 12 };
+    if (maxRounds <= 15) return { size: 6, gap: 6, completedSize: 8, currentSize: 10 };
+    return { size: 5, gap: 5, completedSize: 6, currentSize: 8 };
+  };
+
+  const progressDotSize = getProgressDotSize();
+
   // Animation de pulsation continue pour l'icône (loading + musique)
   useEffect(() => {
     let pulseAnimation: Animated.CompositeAnimation;
@@ -361,7 +372,7 @@ export default function GameScreen(props: GameScreenProps) {
         Alert.alert(
           "Pas de chance",
           result.error || "Aucun extrait audio trouvé pour cette manche.",
-          [{ text: "Suivant", onPress: () => handleSkip() }]
+          [{ text: "Retour au menu", onPress: () => navigation.replace('Menu', {}) }]
         );
         isLoadingRef.current = false;
         setLoading(false);
@@ -611,20 +622,44 @@ export default function GameScreen(props: GameScreenProps) {
     navigateToReveal(totalScore);
   };
 
-  const handleSkip = async () => {
-    // Feedback haptique léger pour le skip
+  const handleQuit = async () => {
+    // Feedback haptique léger
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
-    // Arrêter le timer
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-    
-    // ✅ Arrêter complètement le son avant de naviguer
-    await stopSound(true);
-    setIsPlaying(false);
-    navigateToReveal(0);
+    // Demander confirmation avant de quitter
+    Alert.alert(
+      "Quitter la partie ?",
+      "Êtes-vous sûr de vouloir abandonner la partie en cours ? Vos scores seront perdus.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel",
+          onPress: () => {
+            Logger.info("Annulation de la sortie de partie");
+          }
+        },
+        {
+          text: "Quitter",
+          style: "destructive",
+          onPress: async () => {
+            Logger.info("Quitter la partie - Arrêt du son et retour au menu");
+            
+            // Arrêter le timer
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            
+            // Arrêter complètement le son
+            await stopSound(true);
+            setIsPlaying(false);
+            
+            // Retourner au menu principal
+            navigation.replace('Menu', {});
+          }
+        }
+      ]
+    );
   };
 
   const handleTimeOut = async () => {
@@ -660,20 +695,6 @@ export default function GameScreen(props: GameScreenProps) {
             <Text style={styles.loadingText}>Recherche d'un extrait...</Text>
             <Text style={styles.loadingSubText}>Préparez-vous ! 🎵</Text>
           </View>
-
-          {/* Indicateur de progression */}
-          <View style={styles.loadingProgress}>
-            {Array.from({ length: maxRounds }).map((_, index) => (
-              <View
-                key={index}
-                style={[
-                  styles.progressDot,
-                  index < round && styles.progressDotCompleted,
-                  index === round - 1 && styles.progressDotCurrent,
-                ]}
-              />
-            ))}
-          </View>
         </View>
       </SafeContainer>
     );
@@ -685,8 +706,9 @@ export default function GameScreen(props: GameScreenProps) {
         {/* Header */}
         <View style={styles.header}>
           <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
-          <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
-            <Text style={styles.skipText}>PASSER</Text>
+          <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+            <Ionicons name="close-circle" size={20} color={COLORS.ERROR_RED} />
+            <Text style={styles.quitText}>QUITTER</Text>
           </TouchableOpacity>
         </View>
 
@@ -700,6 +722,40 @@ export default function GameScreen(props: GameScreenProps) {
               size={160}
             />
             <Text style={styles.pointsPreview}>{500 + (timeLeft * 30)} pts</Text>
+          </View>
+
+          {/* Indicateur de progression des manches */}
+          <View style={[styles.roundProgress, { gap: progressDotSize.gap }]}>
+            {Array.from({ length: maxRounds }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  {
+                    width: progressDotSize.size,
+                    height: progressDotSize.size,
+                    borderRadius: progressDotSize.size / 2,
+                    backgroundColor: COLORS.DARK_TERTIARY,
+                    borderWidth: 2,
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                  },
+                  index < round && {
+                    backgroundColor: COLORS.SPOTIFY_GREEN,
+                    borderColor: COLORS.SPOTIFY_GREEN,
+                    width: progressDotSize.completedSize,
+                    height: progressDotSize.completedSize,
+                    borderRadius: progressDotSize.completedSize / 2,
+                  },
+                  index === round - 1 && {
+                    backgroundColor: COLORS.SPOTIFY_GREEN,
+                    borderColor: COLORS.SPOTIFY_GREEN,
+                    width: progressDotSize.currentSize,
+                    height: progressDotSize.currentSize,
+                    borderRadius: progressDotSize.currentSize / 2,
+                    borderWidth: 3,
+                  },
+                ]}
+              />
+            ))}
           </View>
 
           {/* Visualizer audio fluide avec barres indépendantes */}
@@ -781,11 +837,35 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, justifyContent: 'space-between' },
   header: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   roundIndicator: { color: COLORS.TEXT_PRIMARY, fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
-  skipButton: { backgroundColor: COLORS.DARK_SECONDARY, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
-  skipText: { color: COLORS.TEXT_SECONDARY, fontWeight: '700', fontSize: 12, textAlign: 'center' },
+  quitButton: { 
+    backgroundColor: 'rgba(239, 68, 68, 0.15)', 
+    paddingHorizontal: 12, 
+    paddingVertical: 8, 
+    borderRadius: 16, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  quitText: { 
+    color: COLORS.ERROR_RED, 
+    fontWeight: '700', 
+    fontSize: 12, 
+    textAlign: 'center' 
+  },
   centerSection: { alignItems: 'center', flex: 0 },
-  timerContainer: { alignItems: 'center', marginBottom: 20 },
+  timerContainer: { alignItems: 'center', marginBottom: 16 },
   pointsPreview: { color: COLORS.SPOTIFY_GREEN, fontSize: 16, fontWeight: '900', marginTop: 10 },
+  roundProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    maxWidth: width - 40,
+    marginBottom: 20,
+  },
   visualizerContainer: { 
     flexDirection: 'row', 
     alignItems: 'flex-end', 
@@ -947,33 +1027,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: COLORS.TEXT_SECONDARY,
     fontWeight: '600',
-  },
-  loadingProgress: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-  },
-  progressDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: COLORS.DARK_TERTIARY,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  progressDotCompleted: {
-    backgroundColor: COLORS.SPOTIFY_GREEN,
-    borderColor: COLORS.SPOTIFY_GREEN,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-  },
-  progressDotCurrent: {
-    backgroundColor: COLORS.SPOTIFY_GREEN,
-    borderColor: COLORS.SPOTIFY_GREEN,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 3,
   },
 });
