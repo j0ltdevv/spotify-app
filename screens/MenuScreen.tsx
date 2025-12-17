@@ -4,8 +4,10 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import LottieView from 'lottie-react-native';
 import * as Haptics from 'expo-haptics';
+
+// Création d'un composant Gradient Animé
+const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 import { COLORS } from '../constants';
 import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -71,9 +73,9 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
       );
     };
 
-    const anim1 = createLoopAnimation(bgAnim1, 8000);
-    const anim2 = createLoopAnimation(bgAnim2, 10000);
-    const anim3 = createLoopAnimation(bgAnim3, 12000);
+    const anim1 = createLoopAnimation(bgAnim1, 3000); // Accéléré
+    const anim2 = createLoopAnimation(bgAnim2, 4000); // Accéléré
+    const anim3 = createLoopAnimation(bgAnim3, 5000); // Accéléré
 
     anim1.start();
     anim2.start();
@@ -201,22 +203,22 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
   // Interpolations pour les animations de fond
   const translateY1 = bgAnim1.interpolate({
     inputRange: [0, 1],
-    outputRange: [-100, 100],
+    outputRange: [-150, 150], // Mouvement amplifié
   });
 
   const translateY2 = bgAnim2.interpolate({
     inputRange: [0, 1],
-    outputRange: [100, -100],
+    outputRange: [150, -150], // Mouvement amplifié
   });
 
   const scale3 = bgAnim3.interpolate({
     inputRange: [0, 1],
-    outputRange: [1, 1.5],
+    outputRange: [1, 1.8], // Scale amplifié
   });
 
   const opacity1 = bgAnim1.interpolate({
     inputRange: [0, 0.5, 1],
-    outputRange: [0.3, 0.6, 0.3],
+    outputRange: [0.4, 0.8, 0.4], // Opacité augmentée
   });
 
   // Créer les barres du visualiseur
@@ -257,13 +259,36 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
     <SafeContainer>
       {/* Fond Lottie */}
       <View style={styles.backgroundContainer}>
-         <LottieView
-            source={require('../assets/gradient_bg.lottie')}
-            autoPlay
-            loop
-            style={{ width: '100%', height: '100%' }}
-            resizeMode="cover"
-          />
+        <AnimatedLinearGradient
+          colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT, 'transparent']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{
+            position: 'absolute',
+            width: width * 1.5,
+            height: width * 1.5,
+            borderRadius: width * 0.75,
+            top: -width * 0.5,
+            left: -width * 0.3,
+            opacity: opacity1,
+            transform: [{ translateY: translateY1 }],
+          }} 
+        />
+        <AnimatedLinearGradient
+          colors={['#9b51e0', '#A78BFA', 'transparent']} // Deezer purple enriched
+          start={{ x: 1, y: 1 }}
+          end={{ x: 0, y: 0 }}
+          style={{
+            position: 'absolute',
+            width: width * 1.4,
+            height: width * 1.4,
+            borderRadius: width * 0.7,
+            bottom: -width * 0.4,
+            right: -width * 0.3,
+            opacity: 0.5, // Opacité de base augmentée
+            transform: [{ translateY: translateY2 }, { scale: scale3 }],
+          }} 
+        />
       </View>
 
       <KeyboardAvoidingView 
