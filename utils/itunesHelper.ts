@@ -210,13 +210,24 @@ const levenshteinDistance = (str1: string, str2: string): number => {
 };
 
 /**
+ * Résultat normalisé de la recherche iTunes
+ */
+export interface ItunesResult {
+  audioUrl: string;
+  title: string;
+  artist: string;
+  album: string;
+  cover: string;
+}
+
+/**
  * Recherche un extrait audio sur iTunes
- * Retourne l'URL de preview ou null si aucun résultat valide
+ * Retourne les détails du track iTunes trouvé ou null
  */
 export const fetchAudioFromItunes = async (
   title: string, 
   artist: string
-): Promise<string | null> => {
+): Promise<ItunesResult | null> => {
   try {
     const cleanedTitle = cleanTrackTitle(title);
     console.log(`   🔎 iTunes: Recherche de "${title}" par ${artist}`);
@@ -282,7 +293,13 @@ export const fetchAudioFromItunes = async (
       console.log(`      iTunes: "${bestMatch.trackName}" par ${bestMatch.artistName}`);
       console.log(`      Original: "${title}" par ${artist}`);
       console.log(`      Preview URL: ${bestMatch.previewUrl}`);
-      return bestMatch.previewUrl || null;
+      return {
+        audioUrl: bestMatch.previewUrl!,
+        title: bestMatch.trackName,
+        artist: bestMatch.artistName,
+        album: bestMatch.collectionName,
+        cover: bestMatch.artworkUrl100?.replace('100x100', '600x600') || ''
+      };
     }
 
     console.log(`   🔄 Aucun match ≥90%, tentative avec seuil 80%...`);
@@ -316,7 +333,13 @@ export const fetchAudioFromItunes = async (
       console.log(`   ⚠️ ✅ Match de secours trouvé (80-89%)`);
       console.log(`      iTunes: "${fallbackMatch.trackName}" par ${fallbackMatch.artistName}`);
       console.log(`      Original: "${title}" par ${artist}`);
-      return fallbackMatch.previewUrl || null;
+      return {
+        audioUrl: fallbackMatch.previewUrl!,
+        title: fallbackMatch.trackName,
+        artist: fallbackMatch.artistName,
+        album: fallbackMatch.collectionName,
+        cover: fallbackMatch.artworkUrl100?.replace('100x100', '600x600') || ''
+      };
     }
 
     console.log(`   ❌ ❌ ❌ iTunes: Aucun extrait valide trouvé`);
