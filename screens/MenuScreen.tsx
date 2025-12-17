@@ -42,7 +42,7 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
     if (roomCode) {
       navigation.replace('Lobby', {});
     }
-  }, [roomCode, navigation]);
+  }, [roomCode, navigation]); // This was the fix I made
 
   useEffect(() => {
     // Animation d'entrée de l'interface
@@ -236,7 +236,7 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                 {/* Tagline du document concept */}
                 <View style={styles.taglineBox}>
                     <Text style={styles.taglineText}>
-                        Ne cherchez pas le titre.{'\n'}Cherchez le <Text style={{color: COLORS.SPOTIFY_GREEN, fontWeight: '800'}}>coupable</Text>.
+                        Ne cherchez pas la musique.{'\n'}Cherchez celui qui l'écoute.
                     </Text>
                 </View>
             </View>
@@ -259,7 +259,7 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                           </View>
                           <View style={styles.textContainer}>
                               <Text style={styles.cardTitle}>CRÉER</Text>
-                              <Text style={styles.cardSubtitle}>Lancer une enquête</Text>
+                              <Text style={styles.cardSubtitle}>Lancer une partie</Text>
                           </View>
                       </View>
                   </LinearGradient>
@@ -291,11 +291,11 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                   >
                       <Ionicons name="arrow-back" size={24} color="white" />
                   </TouchableOpacity>
-                  <Text style={styles.joinTitle}>Salle d'interrogatoire</Text>
+                  <Text style={styles.joinTitle}>Rejoindre une salle</Text>
                   <View style={{width: 24}} /> 
                 </View>
                 
-                <Text style={styles.joinInstructions}>Code d'accès à 4 chiffres</Text>
+                <Text style={styles.joinInstructions}>Code d\'accès à 4 chiffres</Text>
                 
                 {renderCodeInput()}
                 
@@ -308,7 +308,7 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                   {isLoading ? (
                       <ActivityIndicator color="black" />
                   ) : (
-                      <Text style={styles.validateButtonText}>COMMENCER L'ENQUÊTE</Text>
+                      <Text style={styles.validateButtonText}>COMMENCER L\'ENQUÊTE</Text>
                   )}
                 </TouchableOpacity>
               </GlassCard>
