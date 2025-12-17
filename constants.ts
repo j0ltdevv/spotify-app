@@ -21,7 +21,7 @@ export const COLORS = {
   SUCCESS_GREEN: '#1DB954',
   INFO_BLUE: '#4ECDC4',
   GOLD: '#F5B041',
-  DEEZER_PURPLE: '#9B51E0', // Mise à jour vers rgb(155, 81, 224)
+  DEEZER_PURPLE: '#9B51E0',
   
   // Couleurs joueurs
   PLAYER_COLORS: {
@@ -52,9 +52,9 @@ export const ANIMATION_CONFIG = {
 };
 
 export const STORAGE_KEYS = {
-  SPOTIFY_TOKEN: '@spotify_access_token',      // Legacy (pour migration progressive)
+  SPOTIFY_TOKEN: '@spotify_access_token',      // Legacy
   SPOTIFY_TOKEN_EXPIRY: '@spotify_token_expiry', // Legacy
-  JWT_TOKEN: '@jwt_token',                      // ✨ Nouveau (Backend JWT)
+  JWT_TOKEN: '@jwt_token',                     // Backend JWT
   GAME_STATE: '@game_state',
   PLAYER_PROFILES: '@player_profiles',
 };
@@ -64,8 +64,6 @@ export const TOKEN_CONFIG = {
   EXPIRY_MARGIN: 5 * 60 * 1000, // 5 minutes de marge
 };
 
-<<<<<<< HEAD
-=======
 export const MOCK_PLAYERS = [
   { id: '1', name: 'Moi', color: COLORS.SPOTIFY_GREEN, emoji: '😎' },
   { id: '2', name: 'Julie', color: COLORS.ERROR_RED, emoji: '🎀' },
@@ -109,7 +107,6 @@ export const GAME_MODES = [
   },
 ];
 
->>>>>>> 55b322adc3fe5209c99cc46cf4594ec9c6b4d9c3
 export const CATEGORIES = [
   { 
     key: 'TOP_RECENT', 
