@@ -328,7 +328,13 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       )}
 
       {/* Players List avec glassmorphism */}
-      <ScrollView style={styles.playersList} contentContainerStyle={styles.playersContent}>
+      <ScrollView 
+        style={styles.playersList} 
+        contentContainerStyle={styles.playersContent}
+        showsVerticalScrollIndicator={true}
+        bounces={true}
+        nestedScrollEnabled={true}
+      >
         <View style={styles.playersHeader}>
           <Text style={styles.playersHeaderText}>Joueurs</Text>
           {isHost && (
@@ -498,10 +504,12 @@ const styles = StyleSheet.create({
   },
   playersList: {
     flex: 1,
+    marginBottom: 12,
   },
   playersContent: {
     paddingHorizontal: 20,
     paddingBottom: 8,
+    flexGrow: 1,
   },
   playersHeader: {
     flexDirection: 'row',
