@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
@@ -37,6 +38,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     maxRounds?: number;
   };
   const { accessToken } = useAuth();
+  const { players, leaveGame } = useGame();
   const { showToast } = useToast();
 
   // Sécurité : Si track est null, créer un objet par défaut
@@ -126,6 +128,42 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     });
   };
 
+  const handleQuit = async () => {
+    // Feedback haptique léger
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Demander confirmation avant de quitter
+    Alert.alert(
+      "Quitter la partie ?",
+      "Êtes-vous sûr de vouloir abandonner la partie en cours ? Vos scores seront perdus.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel",
+          onPress: () => {
+            Logger.info("Annulation de la sortie de partie");
+          }
+        },
+        {
+          text: "Quitter",
+          style: "destructive",
+          onPress: async () => {
+            Logger.info("Quitter la partie depuis RevealScreen - Retour au menu");
+            
+            // Arrêter complètement le son
+            SoundManager.stopSound();
+            
+            // Quitter la session de jeu (nettoyer le contexte)
+            await leaveGame();
+            
+            // Retourner au menu principal
+            navigation.replace('Menu', {});
+          }
+        }
+      ]
+    );
+  };
+
   const handleAddToLiked = async () => {
     if (!accessToken) {
       Alert.alert('Erreur', 'Vous devez être connecté à Spotify');
@@ -162,6 +200,15 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     <SafeContainer backgroundColor={bgColor}>
       {/* Confettis si bonne réponse */}
       {showConfetti && <Confetti />}
+      
+      {/* Header avec bouton quitter */}
+      <View style={styles.headerBar}>
+        <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
+        <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+          <Ionicons name="close-circle" size={20} color={COLORS.ERROR_RED} />
+          <Text style={styles.quitText}>QUITTER</Text>
+        </TouchableOpacity>
+      </View>
       
       <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
         
@@ -207,6 +254,59 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
       </Animated.View>
 
+      {/* Tableau des scores */}
+      <GlassCard style={styles.scoreboardContainer}>
+        <View style={styles.scoreboardHeader}>
+          <Ionicons name="trophy" size={20} color={COLORS.SPOTIFY_GREEN} />
+          <Text style={styles.scoreboardTitle}>CLASSEMENT</Text>
+        </View>
+        
+        <ScrollView style={styles.scoreboardScroll} showsVerticalScrollIndicator={false}>
+          {players
+            .map(player => ({
+              ...player,
+              score: playerScores[player.id] || 0
+            }))
+            .sort((a, b) => b.score - a.score)
+            .map((player, index) => (
+              <View key={player.id} style={styles.scoreboardRow}>
+                {/* Position */}
+                <View style={styles.positionBadge}>
+                  {index === 0 ? (
+                    <Text style={styles.positionEmoji}>🥇</Text>
+                  ) : index === 1 ? (
+                    <Text style={styles.positionEmoji}>🥈</Text>
+                  ) : index === 2 ? (
+                    <Text style={styles.positionEmoji}>🥉</Text>
+                  ) : (
+                    <Text style={styles.positionText}>{index + 1}</Text>
+                  )}
+                </View>
+
+                {/* Avatar */}
+                <View style={[styles.scoreboardAvatar, { borderColor: player.color }]}>
+                  {player.image ? (
+                    <Image source={{ uri: player.image }} style={styles.scoreboardAvatarImage} />
+                  ) : (
+                    <Text style={styles.scoreboardAvatarEmoji}>{player.emoji}</Text>
+                  )}
+                </View>
+
+                {/* Nom */}
+                <Text style={styles.scoreboardPlayerName} numberOfLines={1}>
+                  {player.name}
+                </Text>
+
+                {/* Score */}
+                <View style={styles.scoreboardScoreContainer}>
+                  <Text style={styles.scoreboardScore}>{player.score}</Text>
+                  <Text style={styles.scoreboardScoreLabel}>pts</Text>
+                </View>
+              </View>
+            ))}
+        </ScrollView>
+      </GlassCard>
+
       {/* Footer Boutons avec glassmorphism amélioré */}
       <View style={styles.footer}>
         <PressableCard 
@@ -244,6 +344,39 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  headerBar: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  roundIndicator: {
+    color: COLORS.TEXT_PRIMARY,
+    fontWeight: '800',
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
+  quitButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  quitText: {
+    color: COLORS.ERROR_RED,
+    fontWeight: '700',
+    fontSize: 12,
+    textAlign: 'center',
+  },
   content: {
     flex: 1,
     alignItems: 'center',
@@ -322,6 +455,91 @@ const styles = StyleSheet.create({
     color: COLORS.TEXT_SECONDARY,
     textAlign: 'center',
     fontStyle: 'italic',
+  },
+  scoreboardContainer: {
+    width: '90%',
+    maxHeight: 180,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    padding: 16,
+  },
+  scoreboardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  scoreboardTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.TEXT_PRIMARY,
+    letterSpacing: 1.2,
+  },
+  scoreboardScroll: {
+    maxHeight: 120,
+  },
+  scoreboardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    gap: 12,
+  },
+  positionBadge: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  positionEmoji: {
+    fontSize: 20,
+  },
+  positionText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.TEXT_SECONDARY,
+  },
+  scoreboardAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    overflow: 'hidden',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: COLORS.DARK_SECONDARY,
+  },
+  scoreboardAvatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+  scoreboardAvatarEmoji: {
+    fontSize: 20,
+  },
+  scoreboardPlayerName: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '600',
+    color: COLORS.TEXT_PRIMARY,
+  },
+  scoreboardScoreContainer: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 4,
+  },
+  scoreboardScore: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.SPOTIFY_GREEN,
+  },
+  scoreboardScoreLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.TEXT_SECONDARY,
   },
   footer: {
     paddingHorizontal: 20,
