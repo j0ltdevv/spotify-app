@@ -27,7 +27,12 @@ export default function GameScreen(props: {
   route: RouteProp<RootStackParamList, 'Game'>;
 }) {
   const { navigation, route } = props;
+<<<<<<< HEAD
   const { isHost, setGameTrack, currentTrack: sharedTrack, trackPool, players } = useGame();
+=======
+  const { isHost, setGameTrack, currentTrack: sharedTrack, trackPool, players, leaveGame } = useGame(); // Multiplayer hooks
+  // Récupération des paramètres avec valeurs par défaut
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
   const { accessToken: rawAccessToken } = useAuth();
   const { showToast } = useToast();
   const accessToken = rawAccessToken || '';
@@ -100,6 +105,21 @@ export default function GameScreen(props: {
     }, [])
   );
 
+<<<<<<< HEAD
+=======
+  // Calcul dynamique de la taille des points de progression
+  const getProgressDotSize = () => {
+    if (maxRounds <= 5) return { size: 12, gap: 12, completedSize: 14, currentSize: 16 };
+    if (maxRounds <= 8) return { size: 10, gap: 10, completedSize: 12, currentSize: 14 };
+    if (maxRounds <= 12) return { size: 8, gap: 8, completedSize: 10, currentSize: 12 };
+    if (maxRounds <= 15) return { size: 6, gap: 6, completedSize: 8, currentSize: 10 };
+    return { size: 5, gap: 5, completedSize: 6, currentSize: 8 };
+  };
+
+  const progressDotSize = getProgressDotSize();
+
+  // Animation de pulsation continue pour l'icône (loading + musique)
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
   useEffect(() => {
     if (round === 1) {
       setPlayedTracks([]);
@@ -125,6 +145,7 @@ export default function GameScreen(props: {
   };
 
   const playTrackLogic = async (track: GameTrack) => {
+<<<<<<< HEAD
     setCurrentTrack(track);
     setPlayedTracks(prev => [...prev, track.id]);
     const success = await SoundManager.playSound(track.preview_url, track.id, {
@@ -132,6 +153,175 @@ export default function GameScreen(props: {
     });
     if (success) {
       setIsPlaying(true);
+=======
+      // Définir expectedTrackRef avec le roundId
+      // Note: track.roundId should be set by host before sharing
+      expectedTrackRef.current = track;
+      
+      // Définir currentTrack pour l'affichage
+      setCurrentTrack(track);
+      
+      // Ajouter aux tracks joués (session + global)
+      setPlayedTracks(prev => [...prev, track.id]);
+      playedTracksGlobalRef.current.add(track.id);
+      
+      // Attendre un micro-délai
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // ✅ SOUNDMANAGER: Jouer l'audio
+      const success = await SoundManager.playSound(
+        track.preview_url,
+        track.id,
+        {
+          shouldLoop: false,
+          volume: 1.0,
+          onPlaybackStatusUpdate: (playing) => {
+            Logger.info(`Playback status: ${playing ? 'Playing' : 'Stopped'}`);
+            setIsPlaying(playing);
+          },
+        }
+      );
+
+      if (!success) {
+        Logger.audio.error("Impossible de lire l'audio");
+        showToast("Erreur de lecture audio", 'error', 3000);
+        setIsPlaying(false);
+      } else {
+        Logger.success('Audio démarré avec succès');
+        setIsPlaying(true);
+        setLoading(false);
+        isLoadingRef.current = false;
+        
+        // Préchargement (seulement si host pour éviter double fetch ?) 
+        // Les invités n'ont pas la liste des tracks, donc seul le host précharge et mettra en cache
+        if (isHost && localTracks) { 
+            // Prefetch logic if needed
+        }
+      }
+  };
+
+  // --- LISTENER POUR INVITÉS ---
+  useEffect(() => {
+    // Si je ne suis pas l'hôte et que je reçois un nouveau track
+    if (!isHost && sharedTrack) {
+        // Vérifier si c'est un nouveau track (par ID ou roundId)
+        if (sharedTrack.id !== currentTrack?.id) {
+            console.log("🎧 INVITÉ: Nouveau track reçu de l'hôte !", sharedTrack.title);
+            playTrackLogic(sharedTrack);
+        }
+    }
+  }, [sharedTrack, isHost]);
+
+  const startRound = async () => {
+    // Éviter les appels concurrents
+    if (isLoadingRef.current) {
+      Logger.warn("Démarrage déjà en cours, on ignore");
+      return;
+    }
+    isLoadingRef.current = true;
+    setLoading(true);
+    
+    // Générer un ID unique pour ce round
+    const currentRoundId = `round-${round}-${Date.now()}`;
+    roundIdRef.current = currentRoundId;
+    
+    // S'assurer qu'aucun son n'est en cours ET réinitialiser expectedTrackRef
+    await stopSound(true);
+    setCurrentTrack(null);
+    expectedTrackRef.current = null;
+    
+    Logger.game.start(round, category || 'TOP_RECENT');
+    Logger.info(`Démarrage de la manche ${round} avec ID: ${currentRoundId}`);
+    try {
+      if (!isHost) {
+          Logger.info("Invité: En attente de la sélection de l'hôte...");
+          // Si on a déjà le track partagé (cas de reconnexion ou délai), on le joue direct
+          if (sharedTrack && sharedTrack.roundId === currentRoundId) {
+               Logger.info("Invité: Track déjà disponible, lecture...");
+               await playTrackLogic(sharedTrack);
+          }
+          return; // On arrête ici pour l'invité, le useEffect prendra le relais
+      }
+
+      // --- LOGIQUE HÔTE SEULEMENT ---
+      let tracks: GameTrack[] = [];
+
+      // ✅ LOGIC 1: Utiliser les tracks locaux (Deezer) s'ils existent
+      if (localTracks && localTracks.length > 0) {
+        Logger.info(`Utilisation des ${localTracks.length} tracks locaux (Deezer/Import)`);
+        tracks = localTracks;
+      } 
+      // ✅ LOGIC 2: Utiliser le POT COMMUN (Mélange des joueurs)
+      else if (trackPool && trackPool.length > 0 && category?.startsWith('TOP_')) {
+        Logger.info(`🎱 Utilisation du Pot Commun (${trackPool.length} titres partagés)`);
+        // On mélange le pool pour être sûr
+        tracks = trackPool.sort(() => Math.random() - 0.5);
+      }
+      else {
+        // ✅ LOGIC 3: Sinon, récupérer les tracks par catégorie (Spotify - Host Only)
+        Logger.info('Récupération des tracks via MusicService (Spotify)');
+        tracks = await MusicService.fetchTracksByCategory({
+          accessToken: accessToken || '',
+          category: category || 'TOP_RECENT',
+          excludedTrackIds: playedTracks,
+          limit: 100,
+        });
+      }
+
+      // ✅ SERVICE: Trouver un track jouable (iTunes prioritaire)
+      const result = await MusicService.findPlayableTrack(
+        tracks,
+        [...playedTracks, ...Array.from(playedTracksGlobalRef.current)],
+        15
+      );
+
+      if (!result.success || !result.track) {
+        Logger.warn('Aucun extrait audio trouvé', result.error);
+        showToast(result.error || 'Aucun extrait audio trouvé', 'error', 3000);
+        Alert.alert(
+          "Pas de chance",
+          result.error || "Aucun extrait audio trouvé pour cette manche.",
+          [{ text: "Retour au menu", onPress: () => navigation.replace('Menu', {}) }]
+        );
+        isLoadingRef.current = false;
+        setLoading(false);
+        return;
+      }
+
+      // Vérifier qu'on est toujours dans le bon round
+      if (roundIdRef.current !== currentRoundId) {
+        Logger.warn("Round ID a changé, on annule le chargement");
+        isLoadingRef.current = false;
+        setLoading(false);
+        return;
+      }
+      
+      Logger.audio.play(`${result.track.artist} - ${result.track.title}`);
+      Logger.info(`Track sélectionné: ${result.track.title}`);
+      
+      // ✅ AJOUTER LE ROUND ID AU TRACK POUR LA SYNCHRO
+      const trackWithRoundId = { ...result.track, roundId: currentRoundId };
+
+      // 1. Envoyer à Firebase (Hôte seulement)
+      if (isHost) {
+          console.log('📤 Envoi du track aux autres joueurs...');
+          setGameTrack(trackWithRoundId);
+      }
+
+      // 2. Jouer localement
+      await playTrackLogic(trackWithRoundId);
+
+      // Préchargement (Host only)
+      Logger.info("Lancement du préchargement du prochain track...");
+      MusicService.prefetchNextTrack(
+        tracks,
+        [...playedTracks, result.track.id, ...Array.from(playedTracksGlobalRef.current)],
+        15
+      );
+
+    } catch (error) {
+      Logger.error('Erreur critique startRound', error);
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
       setLoading(false);
       isLoadingRef.current = false;
     }
@@ -199,12 +389,90 @@ export default function GameScreen(props: {
     navigation.navigate('Reveal', { correctPlayer: currentTrack?.correctPlayer, track: currentTrack, score, round, playerScores: newScores, selectedPlayer: playerId, category, maxRounds });
   };
 
+<<<<<<< HEAD
+=======
+  const handleQuit = async () => {
+    // Feedback haptique léger
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Demander confirmation avant de quitter
+    Alert.alert(
+      "Quitter la partie ?",
+      "Êtes-vous sûr de vouloir abandonner la partie en cours ? Vos scores seront perdus.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel",
+          onPress: () => {
+            Logger.info("Annulation de la sortie de partie");
+          }
+        },
+        {
+          text: "Quitter",
+          style: "destructive",
+          onPress: async () => {
+            Logger.info("Quitter la partie - Arrêt du son et retour au menu");
+            
+            // Arrêter le timer
+            if (timerRef.current) {
+              clearInterval(timerRef.current);
+              timerRef.current = null;
+            }
+            
+            // Arrêter complètement le son
+            await stopSound(true);
+            setIsPlaying(false);
+            
+            // Quitter la session de jeu (nettoyer le contexte)
+            await leaveGame();
+            
+            // Retourner au menu principal
+            navigation.replace('Menu', {});
+          }
+        }
+      ]
+    );
+  };
+
+  const handleTimeOut = async () => {
+    // ✅ Arrêter complètement le son avant de naviguer
+    await stopSound(true);
+    setIsPlaying(false);
+    navigateToReveal(0);
+  };
+
+  // --- 5. RENDER ---
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
   if (loading) {
     return (
       <SafeContainer>
         <View style={styles.loadingContainer}>
+<<<<<<< HEAD
           <ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} />
           <Text style={styles.loadingText}>Préparation de la manche {round}...</Text>
+=======
+          {/* Header avec indicateur de manche */}
+          <View style={styles.loadingHeader}>
+            <Animated.View style={[styles.loadingBadge, { transform: [{ scale: musicIconScale }] }]}>
+              <Ionicons name="musical-notes" color={COLORS.SPOTIFY_GREEN} size={24} />
+            </Animated.View>
+            <Text style={styles.loadingTitle}>PRÉPARATION</Text>
+            <Text style={styles.loadingRound}>Manche {round} / {maxRounds}</Text>
+          </View>
+
+          {/* Animation circulaire */}
+          <View style={styles.loadingAnimation}>
+            <View style={styles.loadingCircle}>
+              <ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} />
+            </View>
+          </View>
+
+          {/* Message */}
+          <View style={styles.loadingMessage}>
+            <Text style={styles.loadingText}>Recherche d'un extrait...</Text>
+            <Text style={styles.loadingSubText}>Préparez-vous ! 🎵</Text>
+          </View>
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
         </View>
       </SafeContainer>
     );
@@ -219,9 +487,16 @@ export default function GameScreen(props: {
 
       <View style={styles.container}>
         <View style={styles.header}>
+<<<<<<< HEAD
           <GlassCard style={styles.mancheBadge}><Text style={styles.mancheText}>MANCHE {round}/{maxRounds}</Text></GlassCard>
           <TouchableOpacity onPress={() => Alert.alert("Quitter ?", "Vraiment ?", [{ text: "Non" }, { text: "Oui", onPress: () => navigation.replace('Menu') }])}>
             <Ionicons name="close-circle" size={32} color={COLORS.ERROR_RED} />
+=======
+          <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
+          <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+            <Ionicons name="close-circle" size={20} color={COLORS.ERROR_RED} />
+            <Text style={styles.quitText}>QUITTER</Text>
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
           </TouchableOpacity>
         </View>
 
@@ -230,10 +505,70 @@ export default function GameScreen(props: {
           <Text style={styles.pointsPreview}>{500 + (timeLeft * 30)} PTS</Text>
         </Animated.View>
 
+<<<<<<< HEAD
         <View style={styles.visualizer}>
           {barAnims.map((anim, i) => (
             <Animated.View key={i} style={[styles.bar, { height: anim.interpolate({ inputRange: [0, 1], outputRange: [10, 50] }), opacity: anim }]} />
           ))}
+=======
+          {/* Indicateur de progression des manches */}
+          <View style={[styles.roundProgress, { gap: progressDotSize.gap }]}>
+            {Array.from({ length: maxRounds }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  {
+                    width: progressDotSize.size,
+                    height: progressDotSize.size,
+                    borderRadius: progressDotSize.size / 2,
+                    backgroundColor: COLORS.DARK_TERTIARY,
+                    borderWidth: 2,
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                  },
+                  index < round && {
+                    backgroundColor: COLORS.SPOTIFY_GREEN,
+                    borderColor: COLORS.SPOTIFY_GREEN,
+                    width: progressDotSize.completedSize,
+                    height: progressDotSize.completedSize,
+                    borderRadius: progressDotSize.completedSize / 2,
+                  },
+                  index === round - 1 && {
+                    backgroundColor: COLORS.SPOTIFY_GREEN,
+                    borderColor: COLORS.SPOTIFY_GREEN,
+                    width: progressDotSize.currentSize,
+                    height: progressDotSize.currentSize,
+                    borderRadius: progressDotSize.currentSize / 2,
+                    borderWidth: 3,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          {/* Visualizer audio fluide avec barres indépendantes */}
+          <View style={styles.visualizerContainer}>
+            {barAnims.map((barAnim, i) => {
+              // Hauteur maximale pour chaque barre
+              const maxHeight = 60;
+              const animatedHeight = barAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [10, maxHeight],
+              });
+              
+              return (
+                <Animated.View 
+                  key={i} 
+                  style={[
+                    styles.visualizerBar, 
+                    { 
+                      height: animatedHeight,
+                    }
+                  ]} 
+                />
+              );
+            })}
+          </View>
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
         </View>
 
         <View style={styles.grid}>
@@ -255,6 +590,7 @@ export default function GameScreen(props: {
 }
 
 const styles = StyleSheet.create({
+<<<<<<< HEAD
   container: { flex: 1, padding: 20, justifyContent: 'space-between' },
   bgCircle: { position: 'absolute', width: width * 1.2, height: width * 1.2, borderRadius: width * 0.6, opacity: 0.12 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
@@ -276,3 +612,200 @@ const styles = StyleSheet.create({
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: 'white', marginTop: 20, fontWeight: '700' }
 });
+=======
+  container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, justifyContent: 'space-between' },
+  header: { width: '100%', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  roundIndicator: { color: COLORS.TEXT_PRIMARY, fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
+  quitButton: { 
+    backgroundColor: 'rgba(239, 68, 68, 0.15)', 
+    paddingHorizontal: 12, 
+    paddingVertical: 8, 
+    borderRadius: 16, 
+    alignItems: 'center', 
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  quitText: { 
+    color: COLORS.ERROR_RED, 
+    fontWeight: '700', 
+    fontSize: 12, 
+    textAlign: 'center' 
+  },
+  centerSection: { alignItems: 'center', flex: 0 },
+  timerContainer: { alignItems: 'center', marginBottom: 16 },
+  pointsPreview: { color: COLORS.SPOTIFY_GREEN, fontSize: 16, fontWeight: '900', marginTop: 10 },
+  roundProgress: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    maxWidth: width - 40,
+    marginBottom: 20,
+  },
+  visualizerContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-end', 
+    justifyContent: 'center', 
+    height: 70, 
+    marginBottom: 20,
+    gap: 6,
+    paddingHorizontal: 10,
+  },
+  visualizerBar: { 
+    width: 8, 
+    backgroundColor: COLORS.SPOTIFY_GREEN, 
+    borderRadius: 4,
+    shadowColor: COLORS.SPOTIFY_GREEN,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  playersGrid: { 
+    flexDirection: 'row', 
+    flexWrap: 'wrap', 
+    justifyContent: 'space-between', 
+    width: '100%', 
+    gap: 12, 
+    paddingBottom: 20,
+  },
+  playerVoteWrapper: { 
+    width: '48%',
+  },
+  playerVote: { 
+    width: '100%', 
+    minHeight: 150,
+    borderRadius: 20,
+    backgroundColor: 'rgba(40, 40, 40, 0.6)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  playerVoteContent: { 
+    paddingVertical: 16, 
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    position: 'relative',
+  },
+  avatarContainer: {
+    position: 'relative',
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 80,
+    height: 80,
+  },
+  avatarWrapper: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    padding: 3,
+    backgroundColor: COLORS.DARK_BG,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  avatar: { 
+    width: '100%',
+    height: '100%',
+    borderRadius: 37, 
+    justifyContent: 'center', 
+    alignItems: 'center',
+  },
+  avatarEmoji: { 
+    fontSize: 36 
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 37,
+  },
+  checkmarkBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.SUCCESS_GREEN,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: COLORS.DARK_BG,
+  },
+  playerVoteName: { 
+    color: COLORS.TEXT_PRIMARY, 
+    fontSize: 15, 
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  playerVoteNameSelected: {
+    color: COLORS.SUCCESS_GREEN,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingHeader: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  loadingBadge: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(29, 185, 84, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+  },
+  loadingTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.TEXT_PRIMARY,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  loadingRound: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.SPOTIFY_GREEN,
+    letterSpacing: 1,
+  },
+  loadingAnimation: {
+    marginBottom: 40,
+  },
+  loadingCircle: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(29, 185, 84, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+  },
+  loadingMessage: {
+    alignItems: 'center',
+    marginBottom: 60,
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.TEXT_PRIMARY,
+    marginBottom: 8,
+  },
+  loadingSubText: {
+    fontSize: 14,
+    color: COLORS.TEXT_SECONDARY,
+    fontWeight: '600',
+  },
+});
+>>>>>>> 3f8301479caf13169640973703bfa6e68b8c77db
