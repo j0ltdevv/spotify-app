@@ -47,14 +47,14 @@ export default function GameScreen(props: GameScreenProps) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [timeLeft, setTimeLeft] = useState(GAME_CONFIG.INITIAL_TIME);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
-  const [pulseAnim] = useState(new Animated.Value(1));
   const [timerScale] = useState(new Animated.Value(1));
+  const [musicIconScale] = useState(new Animated.Value(1)); // Animation pour l'icône de musique
   const [loading, setLoading] = useState(true);
   const [playedTracks, setPlayedTracks] = useState<string[]>([]);
   
-  // Animations indépendantes pour chaque barre du visualizer
+  // Nouveau visualiseur - 8 barres avec animation réactive
   const barAnims = useRef(
-    Array.from({ length: 20 }, () => new Animated.Value(0.3))
+    Array.from({ length: 8 }, () => new Animated.Value(0.2))
   ).current;
   // Stockage global des tracks joués (persiste entre les parties)
   const playedTracksGlobalRef = useRef<Set<string>>(new Set());
@@ -93,6 +93,60 @@ export default function GameScreen(props: GameScreenProps) {
       };
     }, [])
   );
+
+  // Animation de pulsation continue pour l'icône (loading + musique)
+  useEffect(() => {
+    let pulseAnimation: Animated.CompositeAnimation;
+    
+    if (loading) {
+      // Animation pendant le chargement (plus lente)
+      pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(musicIconScale, {
+            toValue: 1.25,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+          Animated.timing(musicIconScale, {
+            toValue: 1,
+            duration: 700,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnimation.start();
+    } else if (isPlaying) {
+      // Animation pendant la musique (plus rapide, comme un battement)
+      pulseAnimation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(musicIconScale, {
+            toValue: 1.3,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(musicIconScale, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      pulseAnimation.start();
+    } else {
+      // Retour à la normale
+      Animated.timing(musicIconScale, {
+        toValue: 1,
+        duration: 200,
+        useNativeDriver: true,
+      }).start();
+    }
+    
+    return () => {
+      if (pulseAnimation) {
+        pulseAnimation.stop();
+      }
+    };
+  }, [loading, isPlaying]);
 
   // --- 2. INITIALISATION ET BOUCLE DE JEU ---
   useEffect(() => {
@@ -405,64 +459,99 @@ export default function GameScreen(props: GameScreenProps) {
     }
   }, [timeLeft]);
 
-  // Animation fluide du visualizer synchronisée avec la musique
+  // Nouveau système de visualiseur réactif - Simulation d'analyse audio réelle
   useEffect(() => {
-    Logger.info(`Visualizer: ${isPlaying ? 'PLAYING' : 'STOPPED'} | Track: ${currentTrack ? 'LOADED' : 'NULL'} | Loading: ${loading}`);
+    Logger.info(`Visualizer: ${isPlaying ? 'PLAYING' : 'STOPPED'}`);
     
     if (isPlaying && currentTrack && !loading) {
-      let animationFrameId: number;
       let isActive = true;
+      let animationFrame: number;
       
-      // Fonction d'animation continue à 60 FPS
-      const animateBars = () => {
+      // Variables pour simuler l'énergie de la musique
+      let bassEnergy = 0.5;
+      let midEnergy = 0.5;
+      let highEnergy = 0.5;
+      let beatTimer = 0;
+      
+      const animate = () => {
         if (!isActive) return;
         
+        const now = Date.now() / 1000;
+        beatTimer += 0.016; // ~60fps
+        
+        // Simuler des changements d'énergie (comme une vraie analyse spectrale)
+        // Les basses changent lentement
+        bassEnergy += (Math.random() - 0.5) * 0.08;
+        bassEnergy = Math.max(0.3, Math.min(1.0, bassEnergy));
+        
+        // Les médiums changent moyennement vite
+        midEnergy += (Math.random() - 0.5) * 0.12;
+        midEnergy = Math.max(0.2, Math.min(1.0, midEnergy));
+        
+        // Les aigus changent rapidement
+        highEnergy += (Math.random() - 0.5) * 0.18;
+        highEnergy = Math.max(0.2, Math.min(1.0, highEnergy));
+        
+        // Simuler des "beats" (pics rythmiques)
+        const isBeat = beatTimer > (0.4 + Math.random() * 0.3); // Beat toutes les ~0.5s
+        if (isBeat) {
+          beatTimer = 0;
+          bassEnergy = Math.min(1.2, bassEnergy + 0.4);
+          midEnergy = Math.min(1.1, midEnergy + 0.3);
+        }
+        
+        // Appliquer l'énergie à chaque barre selon sa fréquence
         barAnims.forEach((barAnim, index) => {
-          // Créer des motifs variés basés sur l'index et le temps
-          const time = Date.now() / 1000;
-          const frequency = 2.0 + (index % 5) * 0.6; // Fréquences rapides
-          const phase = index * 0.15; // Déphasage pour effet de vague
+          let energy;
           
-          // Calculer une valeur entre 0.3 et 1.0 avec des variations sinusoïdales
-          const baseValue = 0.5 + Math.sin(time * frequency + phase) * 0.4;
-          const randomVariation = Math.random() * 0.1;
-          const targetValue = Math.max(0.3, Math.min(1.0, baseValue + randomVariation));
+          // Barres 0-2: Basses (graves)
+          if (index < 3) {
+            energy = bassEnergy + Math.sin(now * 1.5 + index) * 0.15;
+          }
+          // Barres 3-5: Médiums
+          else if (index < 6) {
+            energy = midEnergy + Math.sin(now * 2.5 + index) * 0.2;
+          }
+          // Barres 6-7: Aigus
+          else {
+            energy = highEnergy + Math.sin(now * 3.5 + index) * 0.25;
+          }
           
-          // Animation instantanée à 60 FPS
+          // Ajouter du bruit pour effet naturel
+          energy += (Math.random() - 0.5) * 0.1;
+          
+          // Clamper entre 0.15 et 1.3
+          const targetValue = Math.max(0.15, Math.min(1.3, energy));
+          
+          // Animation ultra-rapide pour suivre la "musique"
           Animated.timing(barAnim, {
             toValue: targetValue,
-            duration: 16, // ~60 FPS (16.67ms par frame)
+            duration: 50, // Très rapide pour effet réactif
             useNativeDriver: true,
           }).start();
         });
         
-        // Rafraîchir toutes les 16ms (60 FPS) avec setTimeout
-        animationFrameId = setTimeout(() => {
-          animateBars();
-        }, 16) as any;
+        // Continuer l'animation
+        animationFrame = requestAnimationFrame(animate);
       };
-
-      Logger.info('Démarrage du visualizer audio réactif');
-      animateBars();
-
+      
+      Logger.info('✨ Démarrage du nouveau visualiseur réactif');
+      animate();
+      
       return () => {
-        Logger.info('Arrêt du visualizer');
+        Logger.info('🛑 Arrêt du visualiseur');
         isActive = false;
-        if (animationFrameId) {
-          clearTimeout(animationFrameId);
-        }
+        cancelAnimationFrame(animationFrame);
         barAnims.forEach(barAnim => barAnim.stopAnimation());
       };
     } else {
-      // Réinitialiser toutes les barres
-      Logger.info('Réinitialisation des barres du visualizer');
-      barAnims.forEach((barAnim, index) => {
+      // Arrêt : barres au repos
+      Logger.info('💤 Barres au repos');
+      barAnims.forEach((barAnim) => {
         barAnim.stopAnimation();
-        // Variation légère même au repos pour effet "standby"
-        const restValue = 0.2 + (index % 3) * 0.05;
         Animated.timing(barAnim, {
-          toValue: restValue,
-          duration: 300,
+          toValue: 0.2,
+          duration: 200,
           useNativeDriver: true,
         }).start();
       });
@@ -550,9 +639,9 @@ export default function GameScreen(props: GameScreenProps) {
         <View style={styles.loadingContainer}>
           {/* Header avec indicateur de manche */}
           <View style={styles.loadingHeader}>
-            <View style={styles.loadingBadge}>
+            <Animated.View style={[styles.loadingBadge, { transform: [{ scale: musicIconScale }] }]}>
               <Ionicons name="musical-notes" color={COLORS.SPOTIFY_GREEN} size={24} />
-            </View>
+            </Animated.View>
             <Text style={styles.loadingTitle}>PRÉPARATION</Text>
             <Text style={styles.loadingRound}>Manche {round} / {maxRounds}</Text>
           </View>
@@ -614,7 +703,8 @@ export default function GameScreen(props: GameScreenProps) {
           {/* Visualizer audio fluide avec barres indépendantes */}
           <View style={styles.visualizerContainer}>
             {barAnims.map((barAnim, i) => {
-              const barHeight = 30 + (i % 5) * 12; // Hauteurs variées
+              // Hauteurs de base variées pour créer un effet plus naturel
+              const barHeight = 40 + (i % 4) * 15;
               return (
                 <Animated.View 
                   key={i} 
@@ -696,12 +786,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center', 
     height: 80, 
     marginBottom: 20,
-    gap: 4,
+    gap: 8,
   },
   visualizerBar: { 
-    width: 7, 
+    width: 12, 
     backgroundColor: COLORS.SPOTIFY_GREEN, 
-    borderRadius: 3.5,
+    borderRadius: 6,
   },
   playersGrid: { 
     flexDirection: 'row', 
