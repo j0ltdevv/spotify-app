@@ -4,6 +4,7 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import LottieView from 'lottie-react-native';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../constants';
 import { useGame } from '../contexts/GameContext';
@@ -254,33 +255,15 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
 
   return (
     <SafeContainer>
-      {/* Fond avec visualiseur */}
+      {/* Fond Lottie */}
       <View style={styles.backgroundContainer}>
-        {/* Barres du visualiseur */}
-        <View style={styles.visualizerContainer}>
-          {bars.map((bar, index) => {
-            const barHeight = bar.interpolate({
-              inputRange: [0, 1],
-              outputRange: [50, 800],
-            });
-
-            const color = index % 2 === 0 ? '#1ed760' : '#9b51e0';
-
-            return (
-              <Animated.View
-                key={index}
-                style={[
-                  styles.visualizerBar,
-                  {
-                    height: barHeight,
-                    backgroundColor: color,
-                    opacity: 0.4,
-                  },
-                ]}
-              />
-            );
-          })}
-        </View>
+         <LottieView
+            source={require('../assets/gradient_bg.lottie')}
+            autoPlay
+            loop
+            style={{ width: '100%', height: '100%' }}
+            resizeMode="cover"
+          />
       </View>
 
       <KeyboardAvoidingView 

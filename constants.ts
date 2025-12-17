@@ -106,10 +106,7 @@ export const GAME_MODES = [
     gradient: [COLORS.ERROR_RED, COLORS.WARNING_ORANGE] as [string, string]
   },
 ];
-<<<<<<< HEAD
-=======
 
->>>>>>> 1b81b2ba1f7e1b91d76bfadc0eb7427fd86c9466
 export const CATEGORIES = [
   { 
     key: 'LIKED_SHUFFLE', 
