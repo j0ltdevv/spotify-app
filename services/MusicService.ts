@@ -42,6 +42,11 @@ interface PreviewCacheEntry {
   url: string;
   source: 'iTunes' | 'Spotify' | 'Deezer';
   timestamp: number;
+  // Metadata optionnelles (si la source est iTunes/Deezer et diffère de Spotify)
+  title?: string;
+  artist?: string;
+  album?: string;
+  cover?: string;
 }
 
 /**
@@ -91,11 +96,17 @@ class MusicService {
   /**
    * Ajoute un preview au cache
    */
-  private cachePreview(trackId: string, url: string, source: 'iTunes' | 'Spotify' | 'Deezer'): void {
+  private cachePreview(
+    trackId: string, 
+    url: string, 
+    source: 'iTunes' | 'Spotify' | 'Deezer',
+    metadata?: { title: string, artist: string, album: string, cover: string }
+  ): void {
     this.previewCache.set(trackId, {
       url,
       source,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      ...metadata
     });
     console.log(`   💾 Preview mis en cache (${this.previewCache.size} entrées totales)`);
   }
@@ -337,24 +348,47 @@ class MusicService {
       const cached = this.getCachedPreview(track.id);
       if (cached) {
         console.log(`   💾 [CACHE] ${track.name} trouvé en cache (${cached.source})`);
+        
+        // Si on a des métadonnées en cache (iTunes), on les utilise
+        let gameTrack = this.createGameTrack(track, cached.url, cached.source);
+        if (cached.title) {
+            gameTrack.title = cached.title;
+            gameTrack.artist = cached.artist || gameTrack.artist;
+            gameTrack.album = cached.album || gameTrack.album;
+            gameTrack.albumImage = cached.cover || gameTrack.albumImage;
+        }
+        
         return {
-          track: this.createGameTrack(track, cached.url, cached.source),
+          track: gameTrack,
           success: true
         };
       }
 
-      // PRIORITÉ 1: iTunes
-      audioUrl = await fetchAudioFromItunes(track.name, artistName);
-      if (audioUrl) {
-        this.cachePreview(track.id, audioUrl, 'iTunes');
-        console.log(`   🍎 [ITUNES] ${track.name} trouvé !`);
+      // PRIORITÉ 1: iTunes (Retourne un objet avec métadonnées)
+      const itunesResult = await fetchAudioFromItunes(track.name, artistName);
+      if (itunesResult) {
+        this.cachePreview(track.id, itunesResult.audioUrl, 'iTunes', {
+            title: itunesResult.title,
+            artist: itunesResult.artist,
+            album: itunesResult.album,
+            cover: itunesResult.cover
+        });
+        console.log(`   🍎 [ITUNES] ${track.name} trouvé ! (Metadata synchro: ${itunesResult.title})`);
+        
+        // On crée le track avec les métadonnées iTunes pour éviter la désynchronisation
+        let gameTrack = this.createGameTrack(track, itunesResult.audioUrl, 'iTunes');
+        gameTrack.title = itunesResult.title;
+        gameTrack.artist = itunesResult.artist;
+        gameTrack.album = itunesResult.album;
+        gameTrack.albumImage = itunesResult.cover;
+
         return {
-          track: this.createGameTrack(track, audioUrl, 'iTunes'),
+          track: gameTrack,
           success: true
         };
       }
 
-      // PRIORITÉ 2: Deezer
+      // PRIORITÉ 2: Deezer (Retourne string pour l'instant)
       audioUrl = await fetchAudioFromDeezer(track.name, artistName);
       if (audioUrl) {
         this.cachePreview(track.id, audioUrl, 'Deezer');
