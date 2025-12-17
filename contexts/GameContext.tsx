@@ -1,26 +1,9 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, GAME_CONFIG } from '../constants';
-import { GameTrack, PlayerScores, Player } from '../types';
-import { useAuth } from './AuthContext';
-import { 
-  getFirestore, 
-  doc, 
-  setDoc, 
-  getDoc, 
-  deleteDoc, 
-  onSnapshot, 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  updateDoc, 
-  arrayUnion, 
-  arrayRemove 
-} from 'firebase/firestore'; 
-import { app } from '../services/FirebaseService';
-import UserService from '../services/UserService'; // To get user profile info
-import { getBestImage, getRandomEmoji, getRandomColor } from '../utils/userUtils'; // Added utils
+import { GameTrack, PlayerScores, Player, SpotifyTrack } from '../types';
+
+// ...
 
 interface GameState {
   currentRound: number;
@@ -36,7 +19,7 @@ interface GameState {
   players: Player[];
   status: 'waiting' | 'playing' | 'finished';
   currentTrack?: any;
-  trackPool: GameTrack[]; // Le pot commun de musiques
+  trackPool: SpotifyTrack[]; // Changed to SpotifyTrack for raw candidates
 }
 
 interface GameContextType extends GameState {
@@ -45,7 +28,7 @@ interface GameContextType extends GameState {
   updatePlayerScore: (playerId: string, score: number) => void;
   addPlayedTrack: (trackId: string) => void;
   setGameTrack: (track: any) => void;
-  addToTrackPool: (tracks: GameTrack[]) => Promise<void>; // Nouvelle fonction
+  addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>; // Updated signature
   addBots: () => Promise<void>;
   resetGame: () => Promise<void>;
   saveGameState: () => Promise<void>;
@@ -58,7 +41,7 @@ interface GameContextType extends GameState {
   activeGameDocId: string | null;
 }
 
-const initialGameState: GameState = {
+const getInitialGameState = (): GameState => ({
   currentRound: 1,
   playerScores: {},
   playedTracks: [],
@@ -72,7 +55,7 @@ const initialGameState: GameState = {
   status: 'waiting',
   currentTrack: null, // Firebase doesn't like undefined
   trackPool: [], // Initial empty pool
-};
+});
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
@@ -80,7 +63,7 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 const db = getFirestore(app);
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [gameState, setGameState] = useState<GameState>(initialGameState);
+  const [gameState, setGameState] = useState<GameState>(getInitialGameState());
   const { firebaseUser, isLoading: isAuthLoading, accessToken } = useAuth();
   
   // Track which document we are listening to (Host UID)
@@ -116,7 +99,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         } else {
           console.log('⚠️ Game document deleted. Resetting.');
-          setGameState(initialGameState);
+          setGameState(getInitialGameState());
           setActiveGameDocId(null);
         }
       }, (error) => {
@@ -140,6 +123,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // 2. CREATE GAME (HOST)
   const createGame = async (): Promise<string> => {
     if (!firebaseUser) throw new Error("Must be logged in");
+
+    // Force cleanup if previous state lingers
+    if (activeGameDocId || gameState.roomCode) {
+        console.warn("Cleaning up lingering game state before creating new one");
+        setActiveGameDocId(null);
+        setGameState(getInitialGameState());
+        // Wait a tick
+        await new Promise(r => setTimeout(r, 100));
+    }
 
     const code = generateRoomCode();
     
@@ -168,7 +160,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const cleanHostPlayer = JSON.parse(JSON.stringify(hostPlayer));
 
     const newGame: GameState = {
-      ...initialGameState,
+      ...getInitialGameState(),
       gameId: Date.now(),
       isGameActive: true,
       userId: firebaseUser.uid,
@@ -180,12 +172,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
 
     // Save to Firestore (Doc ID = Host UID)
-    await setDoc(doc(db, 'games', firebaseUser.uid), newGame);
-    
-    setGameState(newGame);
-    setActiveGameDocId(firebaseUser.uid);
-    console.log(`✅ Game Created. Code: ${code}`);
-    return code;
+    try {
+        await setDoc(doc(db, 'games', firebaseUser.uid), newGame);
+        
+        setGameState(newGame);
+        setActiveGameDocId(firebaseUser.uid);
+        console.log(`✅ Game Created. Code: ${code}`);
+        return code;
+    } catch (e) {
+        console.error("Failed to create game doc:", e);
+        throw e;
+    }
   };
 
   // 3. JOIN GAME (GUEST)
@@ -248,24 +245,36 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // 4. LEAVE GAME
   const leaveGame = async () => {
-    if (!firebaseUser || !activeGameDocId) return;
-
-    if (activeGameDocId === firebaseUser.uid) {
-        // I am Host -> End game? Or just reset?
-        // For now, delete game
-        await deleteDoc(doc(db, 'games', firebaseUser.uid));
-        setActiveGameDocId(null);
-        setGameState(initialGameState);
-    } else {
-        // I am Guest -> Remove myself
-        const playerToRemove = gameState.players.find(p => p.id === firebaseUser.uid);
-        if (playerToRemove) {
-            await updateDoc(doc(db, 'games', activeGameDocId), {
-                players: arrayRemove(playerToRemove)
-            });
+    if (!firebaseUser) return;
+    
+    // Always clear local state first to ensure UI responsiveness
+    console.log("🚪 Leaving game...");
+    
+    try {
+        if (activeGameDocId) {
+            if (activeGameDocId === firebaseUser.uid) {
+                // I am Host -> End game? Or just reset?
+                // For now, delete game
+                console.log("🗑️ Host deleting game...");
+                await deleteDoc(doc(db, 'games', firebaseUser.uid));
+            } else {
+                // I am Guest -> Remove myself
+                const playerToRemove = gameState.players.find(p => p.id === firebaseUser.uid);
+                if (playerToRemove) {
+                    console.log("👋 Guest leaving game...");
+                    await updateDoc(doc(db, 'games', activeGameDocId), {
+                        players: arrayRemove(playerToRemove)
+                    });
+                }
+            }
         }
+    } catch (e) {
+        console.warn("Error during leaveGame (ignoring):", e);
+    } finally {
+        // FORCE RESET LOCAL STATE
         setActiveGameDocId(null);
-        setGameState(initialGameState);
+        setGameState(getInitialGameState());
+        console.log("✅ Game state reset.");
     }
   };
 
@@ -332,7 +341,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
   };
 
-  const addToTrackPool = async (tracks: GameTrack[]) => {
+  const addToTrackPool = async (tracks: SpotifyTrack[]) => {
     if (!activeGameDocId) return;
     try {
         // Limiter pour éviter de surcharger Firestore (ex: max 20 par personne)

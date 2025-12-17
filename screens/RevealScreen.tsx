@@ -150,14 +150,18 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
           onPress: async () => {
             Logger.info("Quitter la partie depuis RevealScreen - Retour au menu");
             
-            // Arrêter complètement le son
-            SoundManager.stopSound();
-            
-            // Quitter la session de jeu (nettoyer le contexte)
-            await leaveGame();
-            
-            // Retourner au menu principal
-            navigation.replace('Menu', {});
+            try {
+                // Arrêter complètement le son
+                SoundManager.stopSound();
+                
+                // Quitter la session de jeu (nettoyer le contexte)
+                await leaveGame();
+            } catch (error) {
+                Logger.error("Erreur lors de la sortie (Reveal)", error);
+            } finally {
+                // Retourner au menu principal
+                navigation.replace('Menu', {});
+            }
           }
         }
       ]

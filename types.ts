@@ -33,6 +33,7 @@ export interface SpotifyTrack {
   uri?: string;
   popularity?: number;
   lastPlayed?: string | null;
+  correctPlayer?: string; // ID of the owner for multiplayer
 }
 
 export interface SpotifyUser {
