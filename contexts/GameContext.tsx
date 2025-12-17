@@ -46,6 +46,7 @@ interface GameContextType extends GameState {
   addPlayedTrack: (trackId: string) => void;
   setGameTrack: (track: any) => void;
   addToTrackPool: (tracks: GameTrack[]) => Promise<void>; // Nouvelle fonction
+  addBots: () => Promise<void>;
   resetGame: () => Promise<void>;
   saveGameState: () => Promise<void>;
   loadGameState: () => Promise<void>;
@@ -349,6 +350,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const addBots = async () => {
+      if (!activeGameDocId || firebaseUser?.uid !== gameState.hostId) return;
+
+      const bots: Player[] = [
+          { id: `bot-1-${Date.now()}`, name: "Bot Alice", color: getRandomColor(), emoji: "🤖", image: undefined },
+          { id: `bot-2-${Date.now()}`, name: "Bot Bob", color: getRandomColor(), emoji: "🤖", image: undefined },
+          { id: `bot-3-${Date.now()}`, name: "Bot Charlie", color: getRandomColor(), emoji: "🤖", image: undefined }
+      ];
+      
+      const cleanBots = bots.map(b => JSON.parse(JSON.stringify(b)));
+
+      await updateDoc(doc(db, 'games', activeGameDocId), {
+          players: arrayUnion(...cleanBots),
+          [`playerScores.${cleanBots[0].id}`]: 0,
+          [`playerScores.${cleanBots[1].id}`]: 0,
+          [`playerScores.${cleanBots[2].id}`]: 0
+      });
+  };
+
   const resetGame = async () => {
      await leaveGame();
   };
@@ -375,6 +395,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addPlayedTrack,
     setGameTrack, // Added
     addToTrackPool,
+    addBots,
     resetGame,
     saveGameState,
     loadGameState,
