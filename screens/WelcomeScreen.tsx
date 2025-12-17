@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, ActivityIndicator, Image } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { makeRedirectUri, useAuthRequest, ResponseType, exchangeCodeAsync } from 'expo-auth-session';
 import { RootStackParamList } from '../App';
@@ -34,6 +34,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   const floatAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current; // Nouvelle animation de pulsation
+  const fallAnim = useRef(new Animated.Value(-height)).current; // Animation de chute
 
   // 1. Auth Setup
   const redirectUri = makeRedirectUri({
@@ -62,7 +63,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   }, [isLoading, accessToken, navigation]);
 
   useEffect(() => {
-    // Animation flottante
+    // Animations de fond en boucle
     Animated.loop(
       Animated.sequence([
         Animated.timing(floatAnim, { toValue: -15, duration: 2000, useNativeDriver: true }),
@@ -70,7 +71,6 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
       ])
     ).start();
 
-    // Animation de pulsation (scale)
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, { toValue: 1.1, duration: 1500, useNativeDriver: true }),
@@ -78,8 +78,22 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
       ])
     ).start();
 
-    // Fade In
-    Animated.timing(fadeAnim, { toValue: 1, duration: 1000, delay: 300, useNativeDriver: true }).start();
+    // Animations d'apparition
+    Animated.parallel([
+      Animated.spring(fallAnim, {
+        toValue: 0,
+        tension: 10,
+        friction: 8,
+        delay: 200,
+        useNativeDriver: true,
+      }),
+      Animated.timing(fadeAnim, { 
+        toValue: 1, 
+        duration: 800, 
+        delay: 300, 
+        useNativeDriver: true 
+      }),
+    ]).start();
 
     // Gestion Auth
     if (response?.type === 'success') {
@@ -135,10 +149,16 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
   return (
     <View style={[styles.container, { backgroundColor: COLORS.DARK_BG }]}>
       <View style={styles.outerContainer}>
+        {/* Logo de l'application en haut */}
+        <Animated.Image 
+          source={require('../assets/LogoTransparent.png')} 
+          style={[styles.logo, { opacity: fadeAnim, transform: [{ translateY: fallAnim }, { scale: pulseAnim }] }]} 
+          resizeMode="contain" 
+        />
         {/* Contenu central: Texte + Bouton */}
         <View style={styles.content}>
           <Animated.View style={{ alignItems: 'center', opacity: fadeAnim, transform: [{ translateY: floatAnim }] }}>
-            <Animated.Text style={[styles.promptText, { transform: [{ scale: pulseAnim }] }]}>Connecte ton compte</Animated.Text>
+            <Animated.Text style={styles.promptText}>Connecte ton compte</Animated.Text>
             
             <TouchableOpacity
               style={[styles.loginButton, (!request || isLoading || isAuthenticating) && { opacity: 0.7 }]} 
@@ -165,11 +185,15 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.deezerButton}
+              style={[styles.deezerButton, (!request || isLoading || isAuthenticating) && { opacity: 0.7 }]} // Ajouté la désactivation et l'opacité
+              disabled={!request || isLoading || isAuthenticating} // Ajouté la désactivation
               activeOpacity={0.8}
-              onPress={() => setShowDeezerModal(true)}
+              onPress={() => {
+                Logger.auth.login('Deezer - User initiated'); // Log pour Deezer
+                setShowDeezerModal(true);
+              }}
             >
-              <Ionicons name="radio-outline" size={20} color="white" style={{ marginRight: 10 }} />
+              <Ionicons name="radio-outline" size={20} color={COLORS.TEXT_PRIMARY} style={{ marginRight: 10 }} />
               <Text style={styles.deezerButtonText}>JOUER AVEC DEEZER (BETA)</Text>
             </TouchableOpacity>
 
@@ -220,7 +244,7 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.75)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    // marginBottom: 5, // Supprimé pour positionnement indépendant du bouton
+    marginTop: 20, // Ajouté pour décaler le texte légèrement vers le bas
   },
   // promptTextSub est maintenant inutilisé après la suppression du texte "Spotify"
   // et le positionnement indépendant du bouton
@@ -242,7 +266,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 5,
     elevation: 5,
-    marginTop: 100, // Nouvelle marge pour positionner le bouton indépendamment, descente accentuée
+    marginTop: 50, // Nouvelle marge pour positionner le bouton indépendamment, descente accentuée
   },
   loginButtonText: {
     color: 'white',
@@ -251,22 +275,25 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   deezerButton: {
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-    width: 260,
-    paddingVertical: 12,
+    backgroundColor: COLORS.DEEZER_PURPLE, // Couleur Deezer
+    width: 300, // Même largeur que le bouton Spotify
+    paddingVertical: 18, // Même hauteur que le bouton Spotify
     borderRadius: 30,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 5,
     marginTop: 15,
   },
   deezerButtonText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 1,
+    color: COLORS.TEXT_PRIMARY, // Texte blanc
+    fontSize: 14, // Même taille que le texte Spotify
+    fontWeight: '800', // Même graisse que le texte Spotify
+    letterSpacing: 1, // Même espacement que le texte Spotify
   },
   versionContainer: {
     position: 'absolute',
@@ -280,5 +307,12 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.5)',
     textShadowOffset: { width: 1, height: 1 },
     textShadowRadius: 3
+  },
+  logo: {
+    position: 'absolute',
+    top: 50,
+    width: width,
+    height: width * (1000 / 1732),
+    alignSelf: 'center',
   },
 });
