@@ -64,8 +64,6 @@ export const TOKEN_CONFIG = {
   EXPIRY_MARGIN: 5 * 60 * 1000, // 5 minutes de marge
 };
 
-<<<<<<< HEAD
-=======
 export const MOCK_PLAYERS = [
   { id: '1', name: 'Moi', color: COLORS.SPOTIFY_GREEN, emoji: '😎' },
   { id: '2', name: 'Julie', color: COLORS.ERROR_RED, emoji: '🎀' },
@@ -108,17 +106,7 @@ export const GAME_MODES = [
     gradient: [COLORS.ERROR_RED, COLORS.WARNING_ORANGE] as [string, string]
   },
 ];
-
->>>>>>> 55b322adc3fe5209c99cc46cf4594ec9c6b4d9c3
 export const CATEGORIES = [
-  { 
-    key: 'TOP_RECENT', 
-    label: 'Top Récent', 
-    icon: 'trending-up',
-    description: 'Tes morceaux du moment',
-    gradient: [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT] as [string, string],
-    emoji: '🔥'
-  },
   { 
     key: 'LIKED_SHUFFLE', 
     label: 'Aléatoire', 
@@ -126,6 +114,14 @@ export const CATEGORIES = [
     description: 'Pioche dans tes likes',
     gradient: [COLORS.PLAYER_COLORS.PURPLE, '#C084FC'] as [string, string],
     emoji: '🎲'
+  },
+  { 
+    key: 'TOP_RECENT', 
+    label: 'Top Récent', 
+    icon: 'trending-up',
+    description: 'Tes morceaux du moment',
+    gradient: [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT] as [string, string],
+    emoji: '🔥'
   },
   { 
     key: 'GUILTY_PLEASURES', 
