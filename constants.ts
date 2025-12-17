@@ -21,7 +21,7 @@ export const COLORS = {
   SUCCESS_GREEN: '#1DB954',
   INFO_BLUE: '#4ECDC4',
   GOLD: '#F5B041',
-  DEEZER_PURPLE: '#9B51E0', // Mise à jour vers rgb(155, 81, 224)
+  DEEZER_PURPLE: '#9B51E0',
   
   // Couleurs joueurs
   PLAYER_COLORS: {
@@ -52,9 +52,9 @@ export const ANIMATION_CONFIG = {
 };
 
 export const STORAGE_KEYS = {
-  SPOTIFY_TOKEN: '@spotify_access_token',      // Legacy (pour migration progressive)
+  SPOTIFY_TOKEN: '@spotify_access_token',      // Legacy
   SPOTIFY_TOKEN_EXPIRY: '@spotify_token_expiry', // Legacy
-  JWT_TOKEN: '@jwt_token',                      // ✨ Nouveau (Backend JWT)
+  JWT_TOKEN: '@jwt_token',                     // Backend JWT
   GAME_STATE: '@game_state',
   PLAYER_PROFILES: '@player_profiles',
 };
@@ -106,6 +106,10 @@ export const GAME_MODES = [
     gradient: [COLORS.ERROR_RED, COLORS.WARNING_ORANGE] as [string, string]
   },
 ];
+<<<<<<< HEAD
+=======
+
+>>>>>>> 1b81b2ba1f7e1b91d76bfadc0eb7427fd86c9466
 export const CATEGORIES = [
   { 
     key: 'LIKED_SHUFFLE', 
