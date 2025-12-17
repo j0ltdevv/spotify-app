@@ -126,6 +126,39 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     });
   };
 
+  const handleQuit = async () => {
+    // Feedback haptique léger
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Demander confirmation avant de quitter
+    Alert.alert(
+      "Quitter la partie ?",
+      "Êtes-vous sûr de vouloir abandonner la partie en cours ? Vos scores seront perdus.",
+      [
+        {
+          text: "Annuler",
+          style: "cancel",
+          onPress: () => {
+            Logger.info("Annulation de la sortie de partie");
+          }
+        },
+        {
+          text: "Quitter",
+          style: "destructive",
+          onPress: async () => {
+            Logger.info("Quitter la partie depuis RevealScreen - Retour au menu");
+            
+            // Arrêter complètement le son
+            SoundManager.stopSound();
+            
+            // Retourner au menu principal
+            navigation.replace('Menu', {});
+          }
+        }
+      ]
+    );
+  };
+
   const handleAddToLiked = async () => {
     if (!accessToken) {
       Alert.alert('Erreur', 'Vous devez être connecté à Spotify');
@@ -162,6 +195,15 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     <SafeContainer backgroundColor={bgColor}>
       {/* Confettis si bonne réponse */}
       {showConfetti && <Confetti />}
+      
+      {/* Header avec bouton quitter */}
+      <View style={styles.headerBar}>
+        <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
+        <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+          <Ionicons name="close-circle" size={20} color={COLORS.ERROR_RED} />
+          <Text style={styles.quitText}>QUITTER</Text>
+        </TouchableOpacity>
+      </View>
       
       <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ scale: scaleAnim }] }]}>
         
@@ -244,6 +286,39 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  headerBar: {
+    width: '100%',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 12,
+  },
+  roundIndicator: {
+    color: COLORS.TEXT_PRIMARY,
+    fontWeight: '800',
+    fontSize: 16,
+    letterSpacing: 0.5,
+  },
+  quitButton: {
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+  },
+  quitText: {
+    color: COLORS.ERROR_RED,
+    fontWeight: '700',
+    fontSize: 12,
+    textAlign: 'center',
+  },
   content: {
     flex: 1,
     alignItems: 'center',
