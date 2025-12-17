@@ -24,8 +24,8 @@ export type RootStackParamList = {
   Welcome: undefined;
   Menu: undefined; // Add Menu route
   Lobby: { gameId?: number; tracks?: GameTrack[]; playlistName?: string };
-  Game: { gameId?: number; round?: number; playerScores?: any; category?: string; tracks?: GameTrack[] };
-  Reveal: { correctPlayer: string; track: any; score: number; round: number; playerScores?: any; selectedPlayer?: string; category?: string };
+  Game: { gameId?: number; round?: number; playerScores?: any; category?: string; tracks?: GameTrack[]; maxRounds?: number };
+  Reveal: { correctPlayer: string; track: any; score: number; round: number; playerScores?: any; selectedPlayer?: string; category?: string; maxRounds?: number };
   GameOver: { results: Array<{ name: string; score: number; avatar: { color: string; emoji: string } }> };
   Settings: undefined;
 };

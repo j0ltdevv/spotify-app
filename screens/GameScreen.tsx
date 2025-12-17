@@ -34,12 +34,13 @@ export default function GameScreen(props: GameScreenProps) {
   // Force string pour les appels API
   const accessToken = rawAccessToken || '';
   // Typage robuste pour route.params
-  const { gameId, round = 1, category = 'TOP_RECENT', playerScores: initialScores, tracks: localTracks } = (route.params || {}) as { 
+  const { gameId, round = 1, category = 'TOP_RECENT', playerScores: initialScores, tracks: localTracks, maxRounds = GAME_CONFIG.MAX_ROUNDS } = (route.params || {}) as { 
     gameId?: number; 
     round?: number; 
     category?: string; 
     playerScores?: PlayerScores;
     tracks?: GameTrack[];
+    maxRounds?: number;
   };
   
   const [currentTrack, setCurrentTrack] = useState<GameTrack | null>(null);
@@ -109,7 +110,7 @@ export default function GameScreen(props: GameScreenProps) {
     }
 
     // Vérification de fin de partie
-    if (round > GAME_CONFIG.MAX_ROUNDS) {
+    if (round > maxRounds) {
       // Générer les résultats finaux réels avec vérification
       Logger.info(`Fin de partie - Round ${round} | Scores:`, playerScores);
       
@@ -479,6 +480,7 @@ export default function GameScreen(props: GameScreenProps) {
       playerScores: playerScores,
       selectedPlayer: selectedPlayer ?? undefined,
       category: category,
+      maxRounds: maxRounds,
     });
   };
 
@@ -552,7 +554,7 @@ export default function GameScreen(props: GameScreenProps) {
               <Ionicons name="musical-notes" color={COLORS.SPOTIFY_GREEN} size={24} />
             </View>
             <Text style={styles.loadingTitle}>PRÉPARATION</Text>
-            <Text style={styles.loadingRound}>Manche {round} / {GAME_CONFIG.MAX_ROUNDS}</Text>
+            <Text style={styles.loadingRound}>Manche {round} / {maxRounds}</Text>
           </View>
 
           {/* Animation circulaire */}
@@ -570,7 +572,7 @@ export default function GameScreen(props: GameScreenProps) {
 
           {/* Indicateur de progression */}
           <View style={styles.loadingProgress}>
-            {Array.from({ length: GAME_CONFIG.MAX_ROUNDS }).map((_, index) => (
+            {Array.from({ length: maxRounds }).map((_, index) => (
               <View
                 key={index}
                 style={[
@@ -591,7 +593,7 @@ export default function GameScreen(props: GameScreenProps) {
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.roundIndicator}>MANCHE {round} / {GAME_CONFIG.MAX_ROUNDS}</Text>
+          <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
           <TouchableOpacity style={styles.skipButton} onPress={handleSkip}>
             <Text style={styles.skipText}>PASSER</Text>
           </TouchableOpacity>

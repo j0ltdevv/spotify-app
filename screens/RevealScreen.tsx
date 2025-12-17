@@ -26,7 +26,7 @@ const { width } = Dimensions.get('window');
 
 export default function RevealScreen({ navigation, route }: RevealScreenProps) {
   // On récupère le score, les scores cumulés et le joueur sélectionné
-  const { correctPlayer, track, score = 0, round, playerScores = {}, selectedPlayer, category } = route.params as {
+  const { correctPlayer, track, score = 0, round, playerScores = {}, selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS } = route.params as {
     correctPlayer: string;
     track: GameTrack | null;
     score: number;
@@ -34,6 +34,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     playerScores?: PlayerScores;
     selectedPlayer?: string;
     category?: string;
+    maxRounds?: number;
   };
   const { accessToken } = useAuth();
   const { showToast } = useToast();
@@ -59,7 +60,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     // ✅ IMPORTANT : Arrêter tout son en cours dès l'arrivée sur l'écran Reveal
     SoundManager.stopSound();
     
-    Logger.info(`Reveal - Score: ${score} | Round: ${round}/${GAME_CONFIG.MAX_ROUNDS}`);
+    Logger.info(`Reveal - Score: ${score} | Round: ${round}/${maxRounds}`);
     Logger.info(`Track: ${safeTrack.artist} - ${safeTrack.title}`);
     
     // Feedback haptique uniquement (plus fiable que les sons externes)
@@ -120,7 +121,8 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       gameId: Date.now(),
       round: round + 1,
       playerScores: playerScores,
-      category: category || 'TOP_RECENT'
+      category: category || 'TOP_RECENT',
+      maxRounds: maxRounds
     });
   };
 
