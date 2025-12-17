@@ -64,22 +64,7 @@ export const TOKEN_CONFIG = {
   EXPIRY_MARGIN: 5 * 60 * 1000, // 5 minutes de marge
 };
 
-export const MOCK_PLAYERS = [
-  { id: '1', name: 'Moi', color: COLORS.SPOTIFY_GREEN, emoji: '😎' },
-  { id: '2', name: 'Julie', color: COLORS.ERROR_RED, emoji: '🎀' },
-  { id: '3', name: 'Thomas', color: COLORS.INFO_BLUE, emoji: '🎸' },
-  { id: '4', name: 'Léa', color: COLORS.PLAYER_COLORS.YELLOW, emoji: '✨' },
-];
-
 export const CATEGORIES = [
-  { 
-    key: 'LIKED_SHUFFLE', 
-    label: 'Aléatoire', 
-    icon: 'shuffle',
-    description: 'Pioche dans tes likes',
-    gradient: [COLORS.PLAYER_COLORS.PURPLE, '#C084FC'] as [string, string],
-    emoji: '🎲'
-  },
   { 
     key: 'TOP_RECENT', 
     label: 'Top Récent', 
@@ -89,19 +74,43 @@ export const CATEGORIES = [
     emoji: '🔥'
   },
   { 
+    key: 'LIKED_SHUFFLE', 
+    label: 'Aléatoire', 
+    icon: 'shuffle',
+    description: 'Pioche dans tes likes',
+    gradient: [COLORS.PLAYER_COLORS.PURPLE, '#C084FC'] as [string, string],
+    emoji: '🎲'
+  },
+  { 
     key: 'GUILTY_PLEASURES', 
-    label: 'Guilty Pleasures', 
+    label: 'Plaisirs Coupables', 
     icon: 'heart',
-    description: 'Tes plaisirs coupables',
+    description: 'Années 80, 90, 2000...',
     gradient: [COLORS.ERROR_RED, COLORS.WARNING_ORANGE] as [string, string],
     emoji: '😳'
   },
   { 
     key: 'TOP_5Y', 
-    label: 'Vieux Favoris', 
+    label: 'Flashback', 
     icon: 'time',
-    description: 'Tes anciens hits',
+    description: 'Hits d\'il y a 5 ans',
     gradient: [COLORS.INFO_BLUE, '#6EDDD6'] as [string, string],
     emoji: '⏰'
+  },
+  { 
+    key: 'OST', 
+    label: 'Cinéma & Séries', 
+    icon: 'film',
+    description: 'Bandes originales cultes',
+    gradient: ['#FFD700', '#FDB931'] as [string, string], // Gold
+    emoji: '🎬'
+  },
+  { 
+    key: 'FOCUS_ARTIST', 
+    label: 'Focus Artiste', 
+    icon: 'person',
+    description: 'Ton artiste préféré',
+    gradient: ['#FF0080', '#7928CA'] as [string, string], // Pink/Purple
+    emoji: '🎤'
   },
 ];
