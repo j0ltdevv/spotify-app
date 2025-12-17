@@ -11,6 +11,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import GlassCard from '../components/GlassCard';
 import PressableCard from '../components/PressableCard';
+import SafeContainer from '../components/SafeContainer';
+import ProfileModal from '../components/ProfileModal';
 
 type MenuScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Menu'>;
@@ -26,16 +28,15 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
   const [mode, setMode] = useState<'main' | 'join'>('main');
   const [joinCode, setJoinCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showProfileModal, setShowProfileModal] = useState(false);
   const inputRef = useRef<TextInput>(null);
 
   // Animations Refs
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(50)).current;
-  const bubbleAnim1 = useRef(new Animated.Value(0)).current;
-  const bubbleAnim2 = useRef(new Animated.Value(0)).current;
-  // Stockage des animations pour pouvoir les stopper proprement
-  const loopAnim1 = useRef<Animated.CompositeAnimation>();
-  const loopAnim2 = useRef<Animated.CompositeAnimation>();
+  const bgAnim1 = useRef(new Animated.Value(0)).current;
+  const bgAnim2 = useRef(new Animated.Value(0)).current;
+  const bgAnim3 = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Si une session est déjà active, on redirige
@@ -51,26 +52,36 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
       Animated.spring(slideAnim, { toValue: 0, friction: 8, tension: 40, useNativeDriver: true })
     ]).start();
 
-    // Configuration des animations de fond (Bulles)
-    const createLoop = (animValue: Animated.Value, duration: number) => {
-        return Animated.loop(
-            Animated.sequence([
-              Animated.timing(animValue, { toValue: 1, duration: duration, useNativeDriver: true }),
-              Animated.timing(animValue, { toValue: 0, duration: duration, useNativeDriver: true })
-            ])
-        );
+    // Animations de fond en boucle
+    const createLoopAnimation = (animValue: Animated.Value, duration: number) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.timing(animValue, {
+            toValue: 1,
+            duration: duration,
+            useNativeDriver: true,
+          }),
+          Animated.timing(animValue, {
+            toValue: 0,
+            duration: duration,
+            useNativeDriver: true,
+          }),
+        ])
+      );
     };
 
-    loopAnim1.current = createLoop(bubbleAnim1, 8000);
-    loopAnim2.current = createLoop(bubbleAnim2, 12000);
+    const anim1 = createLoopAnimation(bgAnim1, 8000);
+    const anim2 = createLoopAnimation(bgAnim2, 10000);
+    const anim3 = createLoopAnimation(bgAnim3, 12000);
 
-    loopAnim1.current.start();
-    loopAnim2.current.start();
+    anim1.start();
+    anim2.start();
+    anim3.start();
 
-    // Nettoyage
     return () => {
-        loopAnim1.current?.stop();
-        loopAnim2.current?.stop();
+      anim1.stop();
+      anim2.stop();
+      anim3.stop();
     };
   }, []);
 
@@ -127,6 +138,22 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
       navigation.replace('Welcome');
   };
 
+  const handleSaveProfile = async (username: string, photoURL: string | null) => {
+    try {
+      // TODO: Implémenter la sauvegarde du profil dans Firebase
+      // Pour l'instant on utilise juste les fonctions d'auth existantes
+      
+      showToast("Profil mis à jour avec succès", "success");
+      
+      // Fermer le modal
+      setShowProfileModal(false);
+    } catch (error) {
+      console.error('Erreur lors de la sauvegarde du profil:', error);
+      showToast("Erreur lors de la sauvegarde", "error");
+      throw error;
+    }
+  };
+
   const renderCodeInput = () => {
     return (
       <Pressable style={styles.codeInputContainer} onPress={() => inputRef.current?.focus()}>
@@ -170,40 +197,109 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
     );
   };
 
+  // Interpolations pour les animations de fond
+  const translateY1 = bgAnim1.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-100, 100],
+  });
+
+  const translateY2 = bgAnim2.interpolate({
+    inputRange: [0, 1],
+    outputRange: [100, -100],
+  });
+
+  const scale3 = bgAnim3.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 1.5],
+  });
+
+  const opacity1 = bgAnim1.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: [0.3, 0.6, 0.3],
+  });
+
+  // Créer les barres du visualiseur
+  const barCount = 40;
+  const bars = useRef(
+    Array.from({ length: barCount }, () => new Animated.Value(0.3))
+  ).current;
+
+  // Animation des barres en boucle
+  useEffect(() => {
+    const animations = bars.map((bar, index) => {
+      return Animated.loop(
+        Animated.sequence([
+          Animated.timing(bar, {
+            toValue: 0.2 + Math.random() * 0.8,
+            duration: 600 + Math.random() * 800,
+            useNativeDriver: false,
+          }),
+          Animated.timing(bar, {
+            toValue: 0.2 + Math.random() * 0.4,
+            duration: 600 + Math.random() * 800,
+            useNativeDriver: false,
+          }),
+        ])
+      );
+    });
+
+    animations.forEach((anim, index) => {
+      setTimeout(() => anim.start(), index * 50);
+    });
+
+    return () => {
+      animations.forEach(anim => anim.stop());
+    };
+  }, []);
+
   return (
-    <View style={styles.container}>
-      
-      {/* --- FOND D'ÉCRAN (Background) --- */}
-      {/* pointerEvents="none" est CRUCIAL ici pour que le fond ne bloque pas les clics */}
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
-          <LinearGradient
-            colors={['#121212', '#080808']}
-            style={StyleSheet.absoluteFillObject}
-          />
-          
-          {/* Background Animé - Bulles */}
-          <Animated.View style={[styles.bubble, { 
-            top: '10%', left: -50, width: width * 0.8, height: width * 0.8, backgroundColor: 'rgba(29, 185, 84, 0.06)',
-            transform: [{ translateY: bubbleAnim1.interpolate({ inputRange: [0, 1], outputRange: [0, -40] }) }] 
-          }]} />
-          
-          <Animated.View style={[styles.bubble, { 
-            bottom: '15%', right: -50, width: width * 0.9, height: width * 0.9, backgroundColor: 'rgba(162, 56, 255, 0.05)',
-            transform: [{ translateY: bubbleAnim2.interpolate({ inputRange: [0, 1], outputRange: [0, 40] }) }] 
-          }]} />
+    <SafeContainer>
+      {/* Fond avec visualiseur */}
+      <View style={styles.backgroundContainer}>
+        {/* Barres du visualiseur */}
+        <View style={styles.visualizerContainer}>
+          {bars.map((bar, index) => {
+            const barHeight = bar.interpolate({
+              inputRange: [0, 1],
+              outputRange: [50, 800],
+            });
+
+            const color = index % 2 === 0 ? '#1ed760' : '#9b51e0';
+
+            return (
+              <Animated.View
+                key={index}
+                style={[
+                  styles.visualizerBar,
+                  {
+                    height: barHeight,
+                    backgroundColor: color,
+                    opacity: 0.4,
+                  },
+                ]}
+              />
+            );
+          })}
+        </View>
       </View>
 
-      {/* --- CONTENU --- */}
       <KeyboardAvoidingView 
         behavior={Platform.OS === "ios" ? "padding" : "height"} 
-        style={{ flex: 1, zIndex: 10 }} // zIndex élevé pour passer au dessus du fond
-        enabled={mode === 'join'} // ACTIVÉ SEULEMENT EN MODE JOIN
+        style={{ flex: 1 }}
+        enabled={mode === 'join'}
       >
         <Animated.View style={[styles.content, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           
-          {/* Header Profil */}
+          {/* Header avec Profil et Quitter */}
           <View style={styles.headerProfile}>
-              <View style={styles.profileInfo}>
+              <TouchableOpacity 
+                style={styles.profileInfo}
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setShowProfileModal(true);
+                }}
+                activeOpacity={0.7}
+              >
                   <View style={styles.avatarContainer}>
                       {firebaseUser?.photoURL ? (
                           <Image 
@@ -221,63 +317,48 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                         {firebaseUser?.displayName || 'Détective'}
                       </Text>
                   </View>
-              </View>
+                  <Ionicons name="chevron-forward" size={20} color="#999" style={{ marginLeft: 8 }} />
+              </TouchableOpacity>
               <TouchableOpacity onPress={handleLogout} style={styles.logoutButton}>
                   <Ionicons name="log-out-outline" size={20} color="#FF6B6B" />
               </TouchableOpacity>
           </View>
 
-          {/* TITRE PRINCIPAL */}
-          {mode === 'main' && (
-            <View style={styles.titleContainer}>
-                <Text style={styles.heroTitle}>WHO</Text>
-                <Text style={[styles.heroTitle, { color: COLORS.SPOTIFY_GREEN }]}>LISTENING ?</Text>
-                
-                {/* Tagline du document concept */}
-                <View style={styles.taglineBox}>
-                    <Text style={styles.taglineText}>
-                        Ne cherchez pas la musique.{'\n'}Cherchez celui qui l'écoute.
-                    </Text>
-                </View>
-            </View>
-          )}
+          {/* Logo principal au centre */}
+          <View style={styles.titleContainer}>
+            <Image 
+              source={require('../assets/LogoTransparent.png')} 
+              style={styles.centerLogo} 
+              resizeMode="contain" 
+            />
+          </View>
 
           {/* ZONE D'ACTION */}
           <View style={styles.actionCenterer}>
             {mode === 'main' ? (
               <View style={styles.buttonsStack}>
                 {/* Bouton Créer */}
-                <PressableCard onPress={handleCreate} disabled={isLoading} style={styles.mainCard}>
+                <PressableCard onPress={handleCreate} disabled={isLoading} style={{ width: '100%' }}>
                   <LinearGradient
-                      colors={[COLORS.SPOTIFY_GREEN, '#158a3f']}
+                      colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN]}
                       start={{x: 0, y: 0}} end={{x: 1, y: 0}}
-                      style={styles.gradientButton}
+                      style={styles.actionButton}
                   >
-                      <View style={styles.cardContent}>
-                          <View style={styles.iconCircle}>
-                              <Ionicons name="add" size={30} color={COLORS.SPOTIFY_GREEN} />
-                          </View>
-                          <View style={styles.textContainer}>
-                              <Text style={styles.cardTitle}>CRÉER</Text>
-                              <Text style={styles.cardSubtitle}>Lancer une partie</Text>
-                          </View>
-                      </View>
+                      <Ionicons name="add" size={28} color="white" />
+                      <Text style={styles.actionButtonText}>CRÉER UNE PARTIE</Text>
                   </LinearGradient>
                 </PressableCard>
 
                 {/* Bouton Rejoindre */}
-                <PressableCard onPress={() => setMode('join')} disabled={isLoading} style={styles.mainCard}>
-                  <GlassCard style={styles.glassButton}>
-                      <View style={styles.cardContent}>
-                          <View style={[styles.iconCircle, { backgroundColor: 'rgba(255,255,255,0.15)' }]}>
-                              <Ionicons name="enter-outline" size={28} color="white" />
-                          </View>
-                          <View style={styles.textContainer}>
-                              <Text style={[styles.cardTitle, { color: 'white' }]}>REJOINDRE</Text>
-                              <Text style={styles.cardSubtitle}>Entrer dans une salle</Text>
-                          </View>
-                      </View>
-                  </GlassCard>
+                <PressableCard onPress={() => setMode('join')} disabled={isLoading} style={{ width: '100%' }}>
+                  <LinearGradient
+                      colors={['#9b51e0', '#9b51e0']}
+                      start={{x: 0, y: 0}} end={{x: 1, y: 0}}
+                      style={styles.actionButton}
+                  >
+                      <Ionicons name="enter-outline" size={28} color="white" />
+                      <Text style={styles.actionButtonText}>REJOINDRE</Text>
+                  </LinearGradient>
                 </PressableCard>
               </View>
             ) : (
@@ -308,7 +389,7 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
                   {isLoading ? (
                       <ActivityIndicator color="black" />
                   ) : (
-                      <Text style={styles.validateButtonText}>COMMENCER L\'ENQUÊTE</Text>
+                      <Text style={styles.validateButtonText}>COMMENCER L'ENQUÊTE</Text>
                   )}
                 </TouchableOpacity>
               </GlassCard>
@@ -317,22 +398,65 @@ export default function MenuScreen({ navigation }: MenuScreenProps) {
 
         </Animated.View>
       </KeyboardAvoidingView>
-    </View>
+
+      {/* Modal de profil */}
+      <ProfileModal
+        visible={showProfileModal}
+        onClose={() => setShowProfileModal(false)}
+        currentUsername={firebaseUser?.displayName || 'Détective'}
+        currentPhotoURL={firebaseUser?.photoURL || null}
+        onSave={handleSaveProfile}
+      />
+    </SafeContainer>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#121212' },
-  bubble: { position: 'absolute', borderRadius: 999 },
-  content: { flex: 1, padding: 24, justifyContent: 'space-between' },
+  content: { flex: 1, padding: 24, justifyContent: 'space-between', zIndex: 10 },
+  
+  // Fond avec visualiseur
+  backgroundContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    overflow: 'hidden',
+    backgroundColor: '#121212',
+  },
+  visualizerContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  visualizerBar: {
+    width: 8,
+    borderRadius: 4,
+  },
   
   // Profile Header
   headerProfile: { 
       flexDirection: 'row', 
       justifyContent: 'space-between', 
       alignItems: 'center', 
-      marginTop: Platform.OS === 'ios' ? 50 : 60,
+      marginTop: Platform.OS === 'ios' ? 10 : 20,
       marginBottom: 20
+  },
+  
+  // Logo principal
+  titleContainer: {
+      flex: 1,
+      justifyContent: 'center',
+      alignItems: 'center',
+  },
+  centerLogo: {
+      width: width * 1.7,
+      height: 360,
   },
   profileInfo: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   avatarContainer: { 
@@ -349,46 +473,39 @@ const styles = StyleSheet.create({
       borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255, 107, 107, 0.15)' 
   },
 
-  // Hero Title Styling
-  titleContainer: { alignItems: 'center', justifyContent: 'center', flexGrow: 1, paddingBottom: 60 },
-  heroTitle: { 
-      fontSize: 56, fontWeight: '900', color: 'white', 
-      lineHeight: 56, letterSpacing: -1, textAlign: 'center',
-      fontStyle: 'italic'
-  },
-  taglineBox: {
-      marginTop: 24, paddingHorizontal: 20, paddingVertical: 10,
-      borderRadius: 12, backgroundColor: 'rgba(255,255,255,0.05)',
-      borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)'
-  },
-  taglineText: {
-      color: 'rgba(255,255,255,0.8)', fontSize: 14, fontWeight: '500', 
-      textAlign: 'center', fontStyle: 'italic', lineHeight: 20
-  },
-
   // Action Area
-  actionCenterer: { justifyContent: 'flex-end', paddingBottom: Platform.OS === 'ios' ? 40 : 20, zIndex: 50, width: '100%' },
+  actionCenterer: { 
+      justifyContent: 'flex-end', 
+      paddingBottom: Platform.OS === 'ios' ? 40 : 20, 
+      paddingHorizontal: 20,
+      zIndex: 50, 
+      width: '100%' 
+  },
   buttonsStack: { gap: 16, width: '100%' },
-  mainCard: { width: '100%', height: 85, borderRadius: 16 },
-  gradientButton: { width: '100%', height: '100%', borderRadius: 16 },
-  glassButton: { width: '100%', height: '100%', borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.05)' },
-  
-  cardContent: { 
-      flex: 1, flexDirection: 'row', alignItems: 'center', 
-      paddingHorizontal: 20 
+  actionButton: {
+      paddingVertical: 16,
+      borderRadius: 30,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      shadowColor: COLORS.SPOTIFY_GREEN,
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.4,
+      shadowRadius: 16,
+      elevation: 12,
   },
-  iconCircle: { 
-      width: 46, height: 46, borderRadius: 23, backgroundColor: 'white', 
-      justifyContent: 'center', alignItems: 'center', marginRight: 16
+  actionButtonText: {
+      color: 'white',
+      fontSize: 18,
+      fontWeight: '900',
+      letterSpacing: 0.5,
   },
-  textContainer: { flex: 1 },
-  cardTitle: { fontSize: 17, fontWeight: '800', color: '#000', letterSpacing: 0.3, marginBottom: 2 },
-  cardSubtitle: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
 
   // Join Mode Styles
   joinContainer: { padding: 24, borderRadius: 20, alignItems: 'center', backgroundColor: '#181818' },
   joinHeader: { flexDirection: 'row', width: '100%', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  backButton: { padding: 8, margin: -8 }, // HitSlop géré inline
+  backButton: { padding: 8, margin: -8 },
   joinTitle: { fontSize: 17, fontWeight: '700', color: 'white' },
   joinInstructions: { color: '#999', fontSize: 14, marginBottom: 24 },
   

@@ -52,9 +52,9 @@ export default function GameScreen(props: GameScreenProps) {
   const [loading, setLoading] = useState(true);
   const [playedTracks, setPlayedTracks] = useState<string[]>([]);
   
-  // Nouveau visualiseur - 8 barres avec animation réactive
+  // Nouveau visualiseur - 12 barres avec animation réactive
   const barAnims = useRef(
-    Array.from({ length: 8 }, () => new Animated.Value(0.2))
+    Array.from({ length: 12 }, () => new Animated.Value(0.3))
   ).current;
   // Stockage global des tracks joués (persiste entre les parties)
   const playedTracksGlobalRef = useRef<Set<string>>(new Set());
@@ -461,9 +461,9 @@ export default function GameScreen(props: GameScreenProps) {
 
   // Nouveau système de visualiseur réactif - Simulation d'analyse audio réelle
   useEffect(() => {
-    Logger.info(`Visualizer: ${isPlaying ? 'PLAYING' : 'STOPPED'}`);
+    console.log(`🎵 Visualizer State: isPlaying=${isPlaying}, hasTrack=${!!currentTrack}, loading=${loading}`);
     
-    if (isPlaying && currentTrack && !loading) {
+    if (isPlaying && !loading) {
       let isActive = true;
       let animationFrame: number;
       
@@ -526,8 +526,8 @@ export default function GameScreen(props: GameScreenProps) {
           // Animation ultra-rapide pour suivre la "musique"
           Animated.timing(barAnim, {
             toValue: targetValue,
-            duration: 50, // Très rapide pour effet réactif
-            useNativeDriver: true,
+            duration: 80, // Très rapide pour effet réactif
+            useNativeDriver: false, // false car on anime height
           }).start();
         });
         
@@ -535,28 +535,30 @@ export default function GameScreen(props: GameScreenProps) {
         animationFrame = requestAnimationFrame(animate);
       };
       
-      Logger.info('✨ Démarrage du nouveau visualiseur réactif');
+      console.log('✨ Démarrage du visualiseur réactif');
       animate();
       
       return () => {
-        Logger.info('🛑 Arrêt du visualiseur');
+        console.log('🛑 Arrêt du visualiseur');
         isActive = false;
-        cancelAnimationFrame(animationFrame);
+        if (animationFrame) {
+          cancelAnimationFrame(animationFrame);
+        }
         barAnims.forEach(barAnim => barAnim.stopAnimation());
       };
     } else {
       // Arrêt : barres au repos
-      Logger.info('💤 Barres au repos');
+      console.log('💤 Barres au repos (isPlaying=false ou loading=true)');
       barAnims.forEach((barAnim) => {
         barAnim.stopAnimation();
         Animated.timing(barAnim, {
-          toValue: 0.2,
-          duration: 200,
-          useNativeDriver: true,
+          toValue: 0.3,
+          duration: 300,
+          useNativeDriver: false, // false car on anime height
         }).start();
       });
     }
-  }, [isPlaying, currentTrack, loading]);
+  }, [isPlaying, loading]);
 
   // --- 4. ACTIONS JOUEUR ---
   // On passe aussi les scores cumulés à Reveal
@@ -703,16 +705,20 @@ export default function GameScreen(props: GameScreenProps) {
           {/* Visualizer audio fluide avec barres indépendantes */}
           <View style={styles.visualizerContainer}>
             {barAnims.map((barAnim, i) => {
-              // Hauteurs de base variées pour créer un effet plus naturel
-              const barHeight = 40 + (i % 4) * 15;
+              // Hauteur maximale pour chaque barre
+              const maxHeight = 60;
+              const animatedHeight = barAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [10, maxHeight],
+              });
+              
               return (
                 <Animated.View 
                   key={i} 
                   style={[
                     styles.visualizerBar, 
                     { 
-                      height: barHeight,
-                      transform: [{ scaleY: barAnim }],
+                      height: animatedHeight,
                     }
                   ]} 
                 />
@@ -782,16 +788,22 @@ const styles = StyleSheet.create({
   pointsPreview: { color: COLORS.SPOTIFY_GREEN, fontSize: 16, fontWeight: '900', marginTop: 10 },
   visualizerContainer: { 
     flexDirection: 'row', 
-    alignItems: 'center', 
+    alignItems: 'flex-end', 
     justifyContent: 'center', 
-    height: 80, 
+    height: 70, 
     marginBottom: 20,
-    gap: 8,
+    gap: 6,
+    paddingHorizontal: 10,
   },
   visualizerBar: { 
-    width: 12, 
+    width: 8, 
     backgroundColor: COLORS.SPOTIFY_GREEN, 
-    borderRadius: 6,
+    borderRadius: 4,
+    shadowColor: COLORS.SPOTIFY_GREEN,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+    elevation: 5,
   },
   playersGrid: { 
     flexDirection: 'row', 
