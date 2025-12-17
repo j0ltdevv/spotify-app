@@ -9,7 +9,7 @@ import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { CATEGORIES, COLORS } from '../constants';
+import { CATEGORIES, COLORS, GAME_MODES } from '../constants';
 import SafeContainer from '../components/SafeContainer';
 import UserService from '../services/UserService';
 import MusicService from '../services/MusicService'; // Added
@@ -34,6 +34,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const scrollViewRef = useRef<ScrollView>(null);
   
   const [selectedCategory, setSelectedCategory] = useState<string>(CATEGORIES[0].key);
+  const [selectedGameMode, setSelectedGameMode] = useState<string>(GAME_MODES[0].key); // Mode de jeu (Normal par défaut)
   // Remove isAdmin state, use isHost from context
   const [isLoadingProfile, setIsLoadingProfile] = useState(false); // No longer needed as much
   const [isSharingTracks, setIsSharingTracks] = useState(false); // Pour éviter le spam
@@ -85,15 +86,20 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   // Effect to navigate when game starts
   useEffect(() => {
     if (status === 'playing') {
-        Logger.nav('Game', { round: 1, category: selectedCategory });
+        // Récupérer le nombre de manches selon le mode sélectionné
+        const selectedMode = GAME_MODES.find(mode => mode.key === selectedGameMode);
+        const maxRounds = selectedMode ? selectedMode.rounds : 10;
+        
+        Logger.nav('Game', { round: 1, category: selectedCategory, maxRounds });
         navigation.navigate('Game', { 
             round: 1, 
             gameId: Date.now(), 
             category: selectedCategory,
-            tracks: deezerTracks 
+            tracks: deezerTracks,
+            maxRounds 
         });
     }
-  }, [status, navigation, selectedCategory, deezerTracks]);
+  }, [status, navigation, selectedCategory, deezerTracks]); // Removed selectedGameMode from dependencies
 
   // Fonction pour retirer un joueur (admin uniquement)
   const removePlayer = (playerId: string, playerName: string) => {
@@ -265,6 +271,59 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
             />
           ))}
         </View>
+      </View>
+      )}
+
+      {/* Section des sous-modes pour le mode Aléatoire */}
+      {!deezerTracks && selectedCategory === 'LIKED_SHUFFLE' && (
+      <View style={styles.gameModeSection}>
+        <View style={styles.categoryHeader}>
+          <Ionicons name="game-controller" color="#A78BFA" size={20} />
+          <Text style={styles.categoryTitle}>Durée de la partie</Text>
+        </View>
+        <ScrollView 
+          horizontal 
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.gameModesContainer}
+        >
+          {GAME_MODES.map((mode) => {
+            const isSelected = selectedGameMode === mode.key;
+            return (
+              <TouchableOpacity
+                key={mode.key}
+                style={styles.gameModeCard}
+                onPress={() => {
+                  if (!isHost) return; // Only host can change mode
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setSelectedGameMode(mode.key);
+                }}
+                activeOpacity={0.9}
+              >
+                {isSelected ? (
+                  <LinearGradient
+                    colors={mode.gradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.gameModeCardGradient}
+                  >
+                    <Text style={styles.gameModeEmoji}>{mode.emoji}</Text>
+                    <Text style={styles.gameModeLabelSelected}>{mode.label}</Text>
+                    <Text style={styles.gameModeDescriptionSelected}>{mode.description}</Text>
+                    <View style={styles.selectedIndicator}>
+                      <Ionicons name="checkmark-circle" color="#FFFFFF" size={12} />
+                    </View>
+                  </LinearGradient>
+                ) : (
+                  <View style={styles.gameModeCardDefault}>
+                    <Text style={styles.gameModeEmoji}>{mode.emoji}</Text>
+                    <Text style={styles.gameModeLabelDefault}>{mode.label}</Text>
+                    <Text style={styles.gameModeDescriptionDefault}>{mode.description}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
       )}
 
@@ -655,6 +714,74 @@ const styles = StyleSheet.create({
   paginationDotActive: {
     backgroundColor: COLORS.SPOTIFY_GREEN,
     width: 18,
+  },
+  // Styles pour les modes de jeu
+  gameModeSection: {
+    marginBottom: 12,
+    paddingHorizontal: 20,
+  },
+  gameModesContainer: {
+    paddingHorizontal: 20,
+    gap: 8,
+  },
+  gameModeCard: {
+    width: 100,
+    height: 100,
+    marginRight: 8,
+  },
+  gameModeCardGradient: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#A78BFA',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  gameModeCardDefault: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: COLORS.DARK_SECONDARY,
+    borderRadius: 12,
+    padding: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  gameModeEmoji: {
+    fontSize: 28,
+    marginBottom: 4,
+  },
+  gameModeLabelSelected: {
+    color: COLORS.TEXT_PRIMARY,
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  gameModeDescriptionSelected: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 10,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  gameModeLabelDefault: {
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  gameModeDescriptionDefault: {
+    color: COLORS.TEXT_MUTED,
+    fontSize: 10,
+    textAlign: 'center',
+    fontWeight: '500',
   },
   scrollContainer: {
     position: 'relative',
