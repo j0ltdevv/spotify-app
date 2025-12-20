@@ -1,5 +1,10 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { doc, onSnapshot, setDoc, query, collection, where, getDocs, updateDoc, arrayUnion, deleteDoc, arrayRemove, getDoc } from 'firebase/firestore';
+import { db } from '../services/FirebaseService';
+import { useAuth } from './AuthContext';
+import UserService from '../services/UserService';
+import { getBestImage, getRandomColor, getRandomEmoji } from '../utils/userUtils';
 import { STORAGE_KEYS, GAME_CONFIG } from '../constants';
 import { GameTrack, PlayerScores, Player, SpotifyTrack } from '../types';
 
@@ -59,8 +64,7 @@ const getInitialGameState = (): GameState => ({
 
 const GameContext = createContext<GameContextType | undefined>(undefined);
 
-// Initialize Firestore
-const db = getFirestore(app);
+
 
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [gameState, setGameState] = useState<GameState>(getInitialGameState());

@@ -202,7 +202,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       {!deezerTracks && (
       <View style={styles.categorySection}>
         <View style={styles.categoryHeader}>
-          <Ionicons name="grid" color="#1DB954" size={20} />
+          <Ionicons name="grid" color="#1DB954" size={16} />
           <Text style={styles.categoryTitle}>Choisis ta catégorie</Text>
         </View>
         <View style={styles.scrollContainer}>
@@ -280,7 +280,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       {!deezerTracks && selectedCategory === 'LIKED_SHUFFLE' && (
       <View style={styles.gameModeSection}>
         <View style={styles.categoryHeader}>
-          <Ionicons name="game-controller" color="#A78BFA" size={20} />
+          <Ionicons name="game-controller" color="#A78BFA" size={16} />
           <Text style={styles.categoryTitle}>Durée de la partie</Text>
         </View>
         <ScrollView 
@@ -715,7 +715,7 @@ const styles = StyleSheet.create({
   categoryTitle: {
     color: COLORS.TEXT_PRIMARY,
     fontWeight: '800',
-    fontSize: 15,
+    fontSize: 16,
     letterSpacing: 0.5,
   },
   paginationDots: {
@@ -740,13 +740,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   gameModesContainer: {
-    paddingHorizontal: 20,
     gap: 8,
   },
   gameModeCard: {
-    width: 100,
-    height: 100,
-    marginRight: 8,
+    width: 135,
+    height: 155,
   },
   gameModeCardGradient: {
     width: '100%',
@@ -754,7 +752,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-around',
     shadowColor: '#A78BFA',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
@@ -768,7 +766,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 8,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-around',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -806,16 +804,13 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   categoriesScroll: {
-    marginHorizontal: -20,
   },
   categoriesContainer: {
-    paddingHorizontal: 20,
     gap: 8,
   },
   categoryCard: {
     width: 135,
     height: 155,
-    marginRight: 8,
   },
   categoryCardGradient: {
     width: '100%',
