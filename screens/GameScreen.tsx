@@ -44,6 +44,116 @@ export default function GameScreen(props: {
   const [playedTracks, setPlayedTracks] = useState<string[]>([]);
   const [playerScores, setPlayerScores] = useState<PlayerScores>(initialScores || {});
 
+  // Animation values
+  const musicIconScale = useRef(new Animated.Value(1)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const bgAnim1 = useRef(new Animated.Value(0)).current;
+  const bgAnim2 = useRef(new Animated.Value(0)).current;
+  const barAnims = useRef(Array.from({ length: 16 }, () => new Animated.Value(0))).current;
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const progressDotSize = {
+    size: 10,
+    completedSize: 10,
+    currentSize: 14,
+    gap: 6,
+  };
+
+  const stopSound = async (forceStop = false) => {
+    // Stop the sound playback
+    await SoundManager.stopSound();
+    if(forceStop) {
+      setIsPlaying(false);
+    }
+  };
+
+
+  // --- (Animations and Effects) ---
+  
+  // Effect for loading icon animation
+  useEffect(() => {
+    let animation: Animated.CompositeAnimation | null = null;
+    if (loading) {
+      animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(musicIconScale, {
+            toValue: 1.1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+          Animated.timing(musicIconScale, {
+            toValue: 1,
+            duration: 600,
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      animation.start();
+    }
+    
+    return () => {
+      if (animation) {
+        animation.stop();
+      }
+      musicIconScale.setValue(1);
+    };
+  }, [loading]);
+
+  // Effect for game animations (timer pulse, background, visualizer)
+  useEffect(() => {
+    let animations: Animated.CompositeAnimation[] = [];
+    if (!loading) {
+      const pulse = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseAnim, { toValue: 1.05, duration: 400, useNativeDriver: true }),
+          Animated.timing(pulseAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+        ])
+      );
+
+      const move1 = Animated.loop(
+        Animated.sequence([
+          Animated.timing(bgAnim1, { toValue: 1, duration: 8000, useNativeDriver: true }),
+          Animated.timing(bgAnim1, { toValue: 0, duration: 8000, useNativeDriver: true }),
+        ])
+      );
+
+      const move2 = Animated.loop(
+        Animated.sequence([
+          Animated.timing(bgAnim2, { toValue: 1, duration: 8000, useNativeDriver: true }),
+          Animated.timing(bgAnim2, { toValue: 0, duration: 8000, useNativeDriver: true }),
+        ])
+      );
+
+      const barDance = Animated.loop(
+        Animated.stagger(100,
+          barAnims.map(anim =>
+            Animated.sequence([
+              Animated.timing(anim, {
+                toValue: Math.random(),
+                duration: 300,
+                useNativeDriver: true,
+              }),
+              Animated.timing(anim, {
+                toValue: 0,
+                duration: 300,
+                useNativeDriver: true,
+              }),
+            ])
+          )
+        )
+      );
+
+      animations = [pulse, move1, move2, barDance];
+      animations.forEach(anim => anim.start());
+    }
+
+    return () => {
+      animations.forEach(anim => anim.stop());
+    };
+  }, [loading]);
+
+
+
   // ... (existing code)
 
   const handleVoteAction = async (playerId: string) => {
