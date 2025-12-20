@@ -27,7 +27,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const { accessToken, firebaseUser } = useAuth();
   const { 
     players, roomCode, isHost, leaveGame, status, startNewGame, 
-    addToTrackPool, addBots, setup, markSetupAsComplete,
+    addToTrackPool, addBot, setup, markSetupAsComplete,
     trackPool, setGamePlaylist
   } = useGame(); 
   
@@ -190,10 +190,39 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
                 <View style={styles.paginationDots}>{CATEGORIES.map((_, index) => (<View key={index} style={[styles.paginationDot, selectedCategory === CATEGORIES[index].key && styles.paginationDotActive]}/>))}</View>
             </View>
         )}
+
+        {selectedCategory === 'LIKED_SHUFFLE' && !deezerTracks && (
+            <View style={styles.gameModeSection}>
+                <View style={styles.categoryHeader}><Ionicons name="timer-outline" color="#A78BFA" size={16} /><Text style={styles.categoryTitle}>Durée de la partie</Text></View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.gameModesContainer}>
+                    {GAME_MODES.map((mode) => {
+                        const isSelected = selectedGameMode === mode.key;
+                        return (
+                            <TouchableOpacity key={mode.key} style={styles.gameModeCard} onPress={() => { if (isHost) setSelectedGameMode(mode.key); }} activeOpacity={0.9}>
+                                {isSelected ? (
+                                    <LinearGradient colors={mode.gradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.gameModeCardGradient}>
+                                        <Text style={styles.gameModeEmoji}>{mode.emoji}</Text>
+                                        <Text style={styles.gameModeLabelSelected}>{mode.label}</Text>
+                                        <Text style={styles.gameModeDescriptionSelected}>{mode.description}</Text>
+                                    </LinearGradient>
+                                ) : (
+                                    <View style={styles.gameModeCardDefault}>
+                                        <Text style={styles.gameModeEmoji}>{mode.emoji}</Text>
+                                        <Text style={styles.gameModeLabelDefault}>{mode.label}</Text>
+                                        <Text style={styles.gameModeDescriptionDefault}>{mode.description}</Text>
+                                    </View>
+                                )}
+                            </TouchableOpacity>
+                        );
+                    })}
+                </ScrollView>
+            </View>
+        )}
+
         <ScrollView style={styles.playersList} contentContainerStyle={styles.playersContent}>
             <View style={styles.playersHeader}>
                 <Text style={styles.playersHeaderText}>Joueurs</Text>
-                {isHost && (<TouchableOpacity onPress={addBots} style={styles.adminBadge}><Ionicons name="add-circle" color="#FFD700" size={14} /><Text style={styles.adminBadgeText}>+ Bots</Text></TouchableOpacity>)}
+                {isHost && (<TouchableOpacity onPress={addBot} style={styles.adminBadge}><Ionicons name="add-circle" color="#FFD700" size={14} /><Text style={styles.adminBadgeText}>+ Bot</Text></TouchableOpacity>)}
             </View>
             {players.map((player: Player) => (
                 <View key={player.id} style={styles.playerCardWrapper}>

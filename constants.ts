@@ -74,8 +74,8 @@ export const MOCK_PLAYERS = [
 // Sous-modes pour le mode Aléatoire
 export const GAME_MODES = [
   { 
-    key: 'NORMAL', 
-    label: 'Normal', 
+    key: 'STANDARD', 
+    label: 'Standard', 
     rounds: 10,
     description: '10 manches',
     emoji: '🎯',

@@ -38,7 +38,7 @@ interface GameContextType extends GameState {
   setGameTrack: (track: any) => void;
   setGamePlaylist: (playlist: GameTrack[]) => void;
   addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>;
-  addBots: () => Promise<void>;
+  addBot: () => Promise<void>;
   resetGame: () => Promise<void>;
   createGame: () => Promise<string>;
   joinGame: (code: string) => Promise<boolean>;
@@ -304,16 +304,21 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await updateDoc(doc(db, 'games', activeGameDocId), { trackPool: arrayUnion(...cleanTracks) });
   };
 
-  const addBots = async () => {
+  const addBot = async () => {
     if (!activeGameDocId || firebaseUser?.uid !== gameState.hostId) return;
-    const bots: Player[] = Array.from({length: 3}).map((_, i) => ({
-      id: `bot-${i+1}-${Date.now()}`, name: `Bot ${i+1}`, color: getRandomColor(), emoji: "🤖"
-    }));
-    const cleanBots = bots.map(b => JSON.parse(JSON.stringify(b)));
-    const botScoreUpdates = Object.fromEntries(bots.map(b => [`playerScores.${b.id}`, 0]));
+    
+    const botCount = gameState.players.filter(p => p.id.startsWith('bot-')).length;
+    const newBot: Player = {
+      id: `bot-${Date.now()}`, 
+      name: `Bot ${botCount + 1}`, 
+      color: getRandomColor(), 
+      emoji: "🤖"
+    };
+    
+    const cleanBot = JSON.parse(JSON.stringify(newBot));
     await updateDoc(doc(db, 'games', activeGameDocId), {
-        players: arrayUnion(...cleanBots),
-        ...botScoreUpdates
+        players: arrayUnion(cleanBot),
+        [`playerScores.${newBot.id}`]: 0
     });
   };
 
@@ -337,7 +342,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setGameTrack,
     setGamePlaylist,
     addToTrackPool,
-    addBots,
+    addBot,
     resetGame,
     createGame,
     joinGame,
