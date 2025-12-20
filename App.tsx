@@ -64,14 +64,7 @@ export default function App() {
                   <Stack.Screen name="Menu" component={MenuScreen} /> 
                   <Stack.Screen name="Lobby" component={LobbyScreen} />
                   <Stack.Screen name="Game" component={GameScreen} />
-                  <Stack.Screen 
-                    name="Reveal" 
-                    component={RevealScreen} 
-                    options={{
-                      animation: 'slide_from_bottom',
-                      presentation: 'modal',
-                    }}
-                  />
+                  <Stack.Screen name="Reveal" component={RevealScreen} />
                   <Stack.Screen name="GameOver" component={GameOverScreen} />
                   <Stack.Screen 
                     name="Settings" 

@@ -324,6 +324,33 @@ export default function GameScreen(props: {
     );
   }
 
+  // --- Dynamic Layout Calculation ---
+  const numPlayers = players.length;
+  let cardWidth = '45%';
+  let avatarSize = 100;
+  let nameSize = 16;
+  let gap = 16;
+
+  if (numPlayers <= 2) {
+    cardWidth = '80%';
+    avatarSize = 140;
+    nameSize = 20;
+  } else if (numPlayers <= 4) {
+    cardWidth = '45%';
+    avatarSize = 100;
+    nameSize = 16;
+  } else if (numPlayers <= 6) {
+    cardWidth = '45%';
+    avatarSize = 80;
+    nameSize = 14;
+    gap = 12;
+  } else {
+    cardWidth = '30%';
+    avatarSize = 60;
+    nameSize = 12;
+    gap = 8;
+  }
+
   return (
     <SafeContainer>
       <View style={styles.container}>
@@ -335,20 +362,28 @@ export default function GameScreen(props: {
           <View style={{ width: 40 }} /> 
         </View>
         <CircularTimer timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
-        <View style={styles.playersGrid}>
+        
+        <View style={styles.voteInstructionContainer}>
+          <Text style={styles.voteInstructionText}>Trouvez celui qui écoute</Text>
+        </View>
+
+        <View style={[styles.playersGrid, { gap }]}>
           {players.map(p => (
-            <PressableCard key={p.id} style={styles.playerVoteWrapper} onPress={() => handleVoteAction(p.id)}>
+            <PressableCard key={p.id} style={{ width: cardWidth as any }} onPress={() => handleVoteAction(p.id)}>
               <GlassCard style={[styles.playerVote, selectedPlayer === p.id && styles.playerVoteSelected]}>
                   {p.image ? (
-                    <Image source={{ uri: p.image }} style={styles.avatarImage} />
+                    <Image source={{ uri: p.image }} style={{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }} />
                   ) : (
-                    <View style={[styles.avatarImage, { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={{ fontSize: 40 }}>{p.emoji || '👤'}</Text>
+                    <View style={[
+                      { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }, 
+                      { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }
+                    ]}>
+                        <Text style={{ fontSize: avatarSize * 0.4 }}>{p.emoji || '👤'}</Text>
                     </View>
                   )}
-                  <Text style={styles.playerVoteName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={[styles.playerVoteName, { fontSize: nameSize }]} numberOfLines={1}>{p.name}</Text>
                   {selectedPlayer === p.id && (
-                    <View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={18} color="#fff" /></View>
+                    <View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={avatarSize * 0.18} color="#fff" /></View>
                   )}
               </GlassCard>
             </PressableCard>
@@ -379,12 +414,28 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 107, 107, 0.2)',
   },
   roundIndicator: { color: 'white', fontWeight: '800', fontSize: 20, textAlign: 'center', letterSpacing: 1 },
-  playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16, marginTop: 'auto', paddingBottom: 20 },
-  playerVoteWrapper: { width: '45%' },
-  playerVote: { padding: 8, alignItems: 'center', borderWidth: 3, borderColor: 'transparent', borderRadius: 20 },
+  voteInstructionContainer: {
+    marginTop: 20,
+    marginBottom: 10,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  voteInstructionText: {
+    color: '#B3B3B3',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+  },
+  playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 'auto', paddingBottom: 20 },
+  playerVote: { padding: 8, alignItems: 'center', borderWidth: 3, borderColor: 'transparent', borderRadius: 20, width: '100%' },
   playerVoteSelected: { borderColor: COLORS.SPOTIFY_GREEN },
-  avatarImage: { width: 100, height: 100, borderRadius: 50, marginBottom: 8 },
-  playerVoteName: { color: 'white', fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  playerVoteName: { color: 'white', fontWeight: '700', textAlign: 'center' },
   checkmarkBadge: { position: 'absolute', top: 5, right: 5, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.SPOTIFY_GREEN, justifyContent: 'center', alignItems: 'center' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 24 },
   loadingTitle: { fontSize: 24, fontWeight: '900', color: 'white', letterSpacing: 2 },

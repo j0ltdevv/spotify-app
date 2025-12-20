@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
@@ -51,9 +51,66 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     coverRotate: new Animated.Value(0),
     infoFade: new Animated.Value(0),
     buttonFade: new Animated.Value(0),
+    bannerFade: new Animated.Value(0),
+    bannerY: new Animated.Value(-100),
   });
   const [showConfetti, setShowConfetti] = useState(isGuessCorrect);
-  const [autoNextTime, setAutoNextTime] = useState(8); // 8 secondes avant transition auto
+  const [autoNextTime, setAutoNextTime] = useState(8); 
+  const [bannerVisible, setBannerVisible] = useState(true);
+  const bannerTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // PanResponder pour le glissement manuel
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderMove: (_, gestureState) => {
+        // Autoriser seulement le glissement vers le haut
+        if (gestureState.dy < 0) {
+          anims.bannerY.setValue(gestureState.dy);
+        }
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        if (gestureState.dy < -30) {
+          // Swipe vers le haut détecté
+          dismissBanner();
+        } else {
+          // Rebondir si pas assez glissé
+          Animated.spring(anims.bannerY, { toValue: 0, tension: 50, friction: 8, useNativeDriver: true }).start();
+        }
+      },
+    })
+  ).current;
+
+  const dismissBanner = () => {
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    Animated.parallel([
+      Animated.timing(anims.bannerFade, { toValue: 0, duration: 300, useNativeDriver: true }),
+      Animated.timing(anims.bannerY, { toValue: -150, duration: 300, useNativeDriver: true }),
+    ]).start(() => setBannerVisible(false));
+  };
+
+  const handleQuit = () => {
+    Alert.alert(
+      "Quitter la partie",
+      "Es-tu sûr de vouloir quitter ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        { 
+          text: "Quitter", 
+          style: "destructive", 
+          onPress: async () => {
+            if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+            if (countdownInterval.current) clearInterval(countdownInterval.current);
+            if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+            await SoundManager.stopSound();
+            await leaveGame();
+            navigation.navigate('Menu');
+          } 
+        }
+      ]
+    );
+  };
 
   const nextRoundTimer = useRef<NodeJS.Timeout | null>(null);
   const countdownInterval = useRef<NodeJS.Timeout | null>(null);
@@ -77,6 +134,17 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       Animated.timing(anims.infoFade, { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(anims.buttonFade, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
+
+    // Apparition de la bannière
+    Animated.parallel([
+      Animated.timing(anims.bannerFade, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.spring(anims.bannerY, { toValue: 0, tension: 50, friction: 8, useNativeDriver: true }),
+    ]).start();
+
+    // Disparition automatique après 3 secondes
+    bannerTimerRef.current = setTimeout(() => {
+      dismissBanner();
+    }, 3000);
 
     // Gestion du compte à rebours pour la transition automatique
     countdownInterval.current = setInterval(() => {
@@ -152,20 +220,43 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     <SafeContainer>
       {isGuessCorrect && <Confetti />}
       <Animated.View style={[styles.container, { opacity: anims.bgFade }]}>
-        {/* RESULT BANNER */}
-        <LinearGradient
-          colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
-          style={styles.resultBanner}
-        >
-          <View style={styles.bannerIconContainer}>
-            <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
-          </View>
-          <View style={styles.bannerTextContainer}>
-            <Text style={styles.resultBannerText}>{isGuessCorrect ? "CORRECT !" : (selectedPlayer ? "INCORRECT" : "TEMPS ÉCOULÉ")}</Text>
-            {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} pts</Text>}
-          </View>
-        </LinearGradient>
         
+        {/* HEADER WITH QUIT BUTTON */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+            <Ionicons name="close" size={24} color="#FF6B6B" />
+          </TouchableOpacity>
+          <Text style={styles.roundTitle}>MANCHE {round} / {maxRounds}</Text>
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* RESULT BANNER (POPUP) */}
+        {bannerVisible && (
+          <Animated.View 
+            {...panResponder.panHandlers}
+            style={[
+              styles.resultBannerPopup, 
+              { 
+                opacity: anims.bannerFade,
+                transform: [{ translateY: anims.bannerY }] 
+              }
+            ]}
+          >
+            <LinearGradient
+              colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
+              style={styles.resultBanner}
+            >
+              <View style={styles.bannerIconContainer}>
+                <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
+              </View>
+              <View style={styles.bannerTextContainer}>
+                <Text style={styles.resultBannerText}>{isGuessCorrect ? "CORRECT !" : (selectedPlayer ? "INCORRECT" : "TEMPS ÉCOULÉ")}</Text>
+                {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} pts</Text>}
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        )}
+
         <View style={styles.content}>
           <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
             {safeTrack.albumImage ? (
@@ -256,6 +347,37 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'space-between' },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 5,
+    zIndex: 10,
+  },
+  quitButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.2)',
+  },
+  roundTitle: {
+    color: '#B3B3B3',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  resultBannerPopup: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 100,
+  },
   resultBanner: {
     margin: 16,
     paddingVertical: 12,
@@ -265,10 +387,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 15,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 15,
   },
   bannerIconContainer: {
     width: 48,
@@ -297,6 +419,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
+    paddingTop: 80, // Espace pour la bannière absolue au début
   },
   coverImage: {
     width: width * 0.45,
