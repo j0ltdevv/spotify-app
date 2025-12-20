@@ -204,7 +204,7 @@ export default function WelcomeScreen({ navigation }: WelcomeScreenProps) {
         <View style={styles.footer}>
           {/* Version en bas à droite */}
           <View style={styles.versionContainer}>
-            <Text style={styles.version}>Version 1.0</Text>
+            <Text style={styles.version}>Version 1.0 - Who Listening</Text>
           </View>
         </View>
       </View>

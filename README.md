@@ -1,8 +1,6 @@
-# 🎵 Track Roulette
+# 🎵 Who Listening
 
-**Le blind test social ultime avec Spotify !**
-
-Track Roulette est un jeu multijoueur où tes amis doivent deviner quelles musiques **tu** écoutes. Connecte ton compte Spotify, choisis une catégorie (Top Récent, Guilty Pleasures, Vieux Favoris...), et laisse tes amis découvrir tes vrais goûts musicaux ! 📂
+Who Listening est un jeu multijoueur où tes amis doivent deviner quelles musiques **tu** écoutes. Connecte ton compte Spotify, choisis une catégorie (Top Récent, Guilty Pleasures, Vieux Favoris...), et laisse tes amis découvrir tes vrais goûts musicaux ! 📂
 
 ---
 
