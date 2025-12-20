@@ -106,35 +106,6 @@ export default function GameScreen(props: {
 
   // --- Core Game Flow ---
 
-  const startRound = async (track: GameTrack) => {
-    console.log(`🎮 [GameScreen] startRound triggered for track: ${track.title} (ID: ${track.id})`);
-    
-    // Immediate ref update for safety
-    currentTrackRef.current = track;
-    setCurrentTrack(track);
-
-    try {
-      if (track.preview_url) {
-        console.log("🎮 [GameScreen] Requesting SoundManager to play...");
-        await SoundManager.playSound(track.preview_url, track.id);
-      } else {
-        console.warn("🎮 [GameScreen] No preview URL for this track.");
-        showToast("Aucun extrait audio pour ce titre.", "info");
-      }
-      
-      // ✅ This state change triggers the Timer useEffect above
-      setScreenStatus('PLAYING'); 
-
-    } catch (error) {
-      Logger.error("Erreur en démarrant le son", { error, track });
-      showToast("Cet extrait n'a pas pu être chargé.", "error");
-      if (isHost) {
-        roundLock.current = 0;
-        navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
-      }
-    }
-  };
-
   useFocusEffect(
     React.useCallback(() => {
       console.log(`🎮 [GameScreen] Focus Effect triggered. Round: ${round}, Status: ${gameStatus}`);
