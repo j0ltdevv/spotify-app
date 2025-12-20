@@ -25,8 +25,8 @@ export type RootStackParamList = {
   Menu: undefined; // Add Menu route
   Lobby: { gameId?: number; tracks?: GameTrack[]; playlistName?: string };
   Game: { gameId?: number; round?: number; playerScores?: any; category?: string; tracks?: GameTrack[]; maxRounds?: number };
-  Reveal: { correctPlayer: string; track: any; score: number; round: number; playerScores?: any; selectedPlayer?: string; category?: string; maxRounds?: number };
-  GameOver: { results: Array<{ name: string; score: number; avatar: { color: string; emoji: string } }> };
+  Reveal: { correctPlayer: string; track: any; score: number; round: number; playerScores?: any; previousScores?: any; selectedPlayer?: string; category?: string; maxRounds?: number };
+  GameOver: { results: Array<{ name: string; score: number; avatar: { color: string; emoji: string; image?: string } }> };
   Settings: undefined;
 };
 
@@ -64,7 +64,14 @@ export default function App() {
                   <Stack.Screen name="Menu" component={MenuScreen} /> 
                   <Stack.Screen name="Lobby" component={LobbyScreen} />
                   <Stack.Screen name="Game" component={GameScreen} />
-                  <Stack.Screen name="Reveal" component={RevealScreen} />
+                  <Stack.Screen 
+                    name="Reveal" 
+                    component={RevealScreen} 
+                    options={{
+                      animation: 'slide_from_bottom',
+                      presentation: 'modal',
+                    }}
+                  />
                   <Stack.Screen name="GameOver" component={GameOverScreen} />
                   <Stack.Screen 
                     name="Settings" 

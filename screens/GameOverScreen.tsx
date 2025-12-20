@@ -8,6 +8,8 @@ import * as Haptics from 'expo-haptics';
 import { BlurView } from 'expo-blur'; // Optionnel pour effet verre, sinon View simple
 
 import { useToast } from '../contexts/ToastContext';
+import { useGame } from '../contexts/GameContext';
+import { useAuth } from '../contexts/AuthContext';
 import { RootStackParamList } from '../App';
 import { COLORS } from '../constants';
 import { GameResult } from '../types';
@@ -79,11 +81,27 @@ const PodiumItem = ({ player, rank, animValue }: { player: GameResult; rank: num
 export default function GameOverScreen({ navigation, route }: GameOverScreenProps) {
   const { results = [] } = route.params || {};
   const { showToast } = useToast();
+  const { isHost, startNewGame, category, players, status, returnToLobby } = useGame();
+  const { firebaseUser } = useAuth();
 
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const podiumAnims = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
   const listAnim = useRef(new Animated.Value(0)).current;
+
+  // Re-direction automatique si la partie redémarre (pour les invités)
+  useEffect(() => {
+    if (status === 'playing') {
+      navigation.replace('Game', { 
+        round: 1, 
+        gameId: Date.now(), 
+        category: category || 'TOP_RECENT'
+      });
+    } else if (status === 'READY') {
+      // Si l'hôte a réinitialisé la partie pour revenir au lobby
+      navigation.navigate('Lobby', {});
+    }
+  }, [status, navigation, category]);
 
   // Data processing
   const { topThree, others, winner } = useMemo(() => {
@@ -94,7 +112,7 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
 
   useEffect(() => {
     if (!results || !results.length) {
-      navigation.replace('Lobby', {});
+      navigation.navigate('Lobby', {});
       return;
     }
 
@@ -113,12 +131,20 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
 
   const handleReplay = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    navigation.replace('Game', { round: 1, gameId: Date.now(), replay: true });
+    if (isHost) {
+      startNewGame(category || 'TOP_RECENT');
+    } else {
+      showToast("Seul l'hôte peut relancer la partie", "info");
+    }
   };
 
-  const handleMenu = () => {
+  const handleMenu = async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    navigation.navigate('Lobby', {});
+    if (isHost) {
+      await returnToLobby();
+    } else {
+      navigation.navigate('Lobby', {});
+    }
   };
 
   if (!results.length) return null;
@@ -130,11 +156,10 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
       {/* Background Gradient plus subtil */}
       <LinearGradient
         colors={['#191414', '#1DB954', '#191414']}
-        style={StyleSheet.absoluteFill}
+        style={[StyleSheet.absoluteFill, { opacity: 0.6 }]}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
         locations={[0, 0.4, 0.9]}
-        opacity={0.6}
       />
 
       <ScrollView 
@@ -165,7 +190,7 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
               <View key={index} style={styles.listItem}>
                 <Text style={styles.listRank}>#{index + 4}</Text>
                 <View style={[styles.listAvatar, { backgroundColor: player.avatar.color }]}>
-                  {player.avatar.image ? (
+                  {!!player.avatar.image ? (
                     <Image source={{ uri: player.avatar.image }} style={styles.avatarImageSmall} />
                   ) : (
                     <Text style={{ fontSize: 16 }}>{player.avatar.emoji}</Text>

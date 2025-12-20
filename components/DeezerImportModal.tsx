@@ -214,7 +214,7 @@ const DeezerImportModal: React.FC<DeezerImportModalProps> = ({ visible, onClose,
       <View style={styles.overlay}>
         <View style={styles.modalContainer}>
           <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Sélectionne ta playlist > Partager > Copier le lien</Text>
+            <Text style={styles.modalTitle}>Sélectionne ta playlist &gt; Partager &gt; Copier le lien</Text>
             <TouchableOpacity onPress={handleClose} style={{ marginRight: -10 }}>
               <Ionicons name="close" size={24} color="white" />
             </TouchableOpacity>
