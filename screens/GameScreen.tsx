@@ -111,7 +111,17 @@ export default function GameScreen(props: {
       console.log(`🎮 [GameScreen] Focus Effect triggered. Round: ${round}, Status: ${gameStatus}`);
       if (gameStatus !== 'playing') return;
       if (round > maxRounds) {
-        navigation.replace('GameOver', { playerScores, players });
+        const results = players.map(p => ({
+          name: p.name,
+          score: playerScores[p.id] || 0,
+          avatar: {
+            color: p.color,
+            emoji: p.emoji,
+            image: p.image
+          }
+        })).sort((a, b) => b.score - a.score);
+
+        navigation.replace('GameOver', { results });
         return;
       }
       if (roundLock.current === round) {
@@ -247,10 +257,12 @@ export default function GameScreen(props: {
       if (updatePlayerScore) updatePlayerScore(myPlayerId, score);
     }
 
-    navigation.navigate('Reveal', { 
+    (navigation.navigate as any)('Reveal', { 
         correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?',
         track: track, // Pass null/track explicitly
-        score, round, playerScores: newScores, 
+        score, round, 
+        playerScores: newScores, 
+        previousScores: playerScores, // Add this
         selectedPlayer: playerId, category, maxRounds 
     });
   };
@@ -270,12 +282,34 @@ export default function GameScreen(props: {
     await SoundManager.stopSound();
     setScreenStatus('VOTED');
 
-    navigation.navigate('Reveal', { 
+    (navigation.navigate as any)('Reveal', { 
         correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?', 
         track: track, // Pass the ref value
-        score: 0, round, playerScores, 
+        score: 0, round, 
+        playerScores, 
+        previousScores: playerScores, // Add this
         selectedPlayer: undefined, category, maxRounds 
     });
+  };
+
+  const handleQuit = () => {
+    Alert.alert(
+      "Quitter la partie",
+      "Es-tu sûr de vouloir quitter ? Ta progression sera perdue.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { 
+          text: "Quitter", 
+          style: "destructive", 
+          onPress: async () => {
+            await SoundManager.stopSound();
+            if (timerRef.current) clearInterval(timerRef.current);
+            await leaveGame();
+            navigation.navigate('Menu');
+          } 
+        }
+      ]
+    );
   };
 
   if (screenStatus === 'PREPARING_ROUND') {
@@ -293,7 +327,13 @@ export default function GameScreen(props: {
   return (
     <SafeContainer>
       <View style={styles.container}>
-        <View style={styles.header}><Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text></View>
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+            <Ionicons name="close" size={24} color="#FF6B6B" />
+          </TouchableOpacity>
+          <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
+          <View style={{ width: 40 }} /> 
+        </View>
         <CircularTimer timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
         <View style={styles.playersGrid}>
           {players.map(p => (
@@ -321,7 +361,23 @@ export default function GameScreen(props: {
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, alignItems: 'center' },
-  header: { width: '100%', marginBottom: 20 },
+  header: { 
+    width: '100%', 
+    marginBottom: 20, 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    justifyContent: 'space-between' 
+  },
+  quitButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.2)',
+  },
   roundIndicator: { color: 'white', fontWeight: '800', fontSize: 20, textAlign: 'center', letterSpacing: 1 },
   playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16, marginTop: 'auto', paddingBottom: 20 },
   playerVoteWrapper: { width: '45%' },

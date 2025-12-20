@@ -18,6 +18,9 @@ import Confetti from '../components/Confetti';
 import PressableCard from '../components/PressableCard';
 import Logger from '../utils/logger';
 
+import { doc, updateDoc } from 'firebase/firestore';
+import { db } from '../services/FirebaseService';
+
 type RevealScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Reveal'>;
   route: RouteProp<RootStackParamList, 'Reveal'>;
@@ -26,9 +29,13 @@ type RevealScreenProps = {
 const { width } = Dimensions.get('window');
 
 export default function RevealScreen({ navigation, route }: RevealScreenProps) {
-  const { correctPlayer, track, score = 0, round, playerScores = {}, selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS } = route.params;
+  const { 
+    correctPlayer, track, score = 0, round, 
+    playerScores = {}, previousScores = {}, 
+    selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS 
+  } = route.params;
   const { firebaseUser } = useAuth();
-  const { players, leaveGame } = useGame();
+  const { players, leaveGame, isHost, activeGameDocId } = useGame();
   const { showToast } = useToast();
 
   const safeTrack: GameTrack = track || { id: '', title: 'Titre inconnu', artist: 'Artiste inconnu', album: 'Album inconnu', albumImage: '', preview_url: '', correctPlayer: '?' };
@@ -46,8 +53,10 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     buttonFade: new Animated.Value(0),
   });
   const [showConfetti, setShowConfetti] = useState(isGuessCorrect);
+  const [autoNextTime, setAutoNextTime] = useState(8); // 8 secondes avant transition auto
 
   const nextRoundTimer = useRef<NodeJS.Timeout | null>(null);
+  const countdownInterval = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     SoundManager.stopSound();
@@ -69,16 +78,61 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       Animated.timing(anims.buttonFade, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
 
+    // Gestion du compte à rebours pour la transition automatique
+    countdownInterval.current = setInterval(() => {
+      setAutoNextTime(prev => {
+        if (prev <= 1) {
+          if (countdownInterval.current) clearInterval(countdownInterval.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    // Transition automatique après 8 secondes
+    nextRoundTimer.current = setTimeout(() => {
+      handleNext();
+    }, 8000);
+
     return () => {
+      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+      if (countdownInterval.current) clearInterval(countdownInterval.current);
       SoundManager.stopSound();
     };
   }, []);
 
-  const handleNext = () => {
+  const handleNext = async () => {
+    // Nettoyer les timers si clic manuel
+    if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+    if (countdownInterval.current) clearInterval(countdownInterval.current);
+
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     if (round >= maxRounds) {
-        navigation.replace('GameOver', { playerScores, players });
+        // Si hôte, marquer la partie comme terminée dans Firestore pour éviter les relances auto
+        if (isHost && activeGameDocId) {
+          try {
+            await updateDoc(doc(db, 'games', activeGameDocId), { 
+              status: 'finished',
+              isGameActive: false 
+            });
+          } catch (e) {
+            console.error("Erreur fin de partie Firestore:", e);
+          }
+        }
+
+        // Formater les résultats pour GameOverScreen
+        const results = players.map(p => ({
+          name: p.name,
+          score: playerScores[p.id] || 0,
+          avatar: {
+            color: p.color,
+            emoji: p.emoji,
+            image: p.image
+          }
+        })).sort((a, b) => b.score - a.score);
+
+        navigation.replace('GameOver', { results });
     } else {
         navigation.replace('Game', {
           round: round + 1,
@@ -98,15 +152,18 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     <SafeContainer>
       {isGuessCorrect && <Confetti />}
       <Animated.View style={[styles.container, { opacity: anims.bgFade }]}>
-        
         {/* RESULT BANNER */}
         <LinearGradient
-          colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#555', '#333']}
+          colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
           style={styles.resultBanner}
         >
-          <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={32} color="white" />
-          <Text style={styles.resultBannerText}>{isGuessCorrect ? "CORRECT !" : (selectedPlayer ? "INCORRECT" : "TEMPS ÉCOULÉ")}</Text>
-          {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} pts</Text>}
+          <View style={styles.bannerIconContainer}>
+            <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
+          </View>
+          <View style={styles.bannerTextContainer}>
+            <Text style={styles.resultBannerText}>{isGuessCorrect ? "CORRECT !" : (selectedPlayer ? "INCORRECT" : "TEMPS ÉCOULÉ")}</Text>
+            {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} pts</Text>}
+          </View>
         </LinearGradient>
         
         <View style={styles.content}>
@@ -115,14 +172,14 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
                 <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
             ) : (
                 <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Ionicons name="musical-notes" size={80} color="#666" />
+                    <Ionicons name="musical-notes" size={60} color="#666" />
                 </View>
             )}
             <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
           </Animated.View>
           
           <Animated.View style={[styles.trackInfo, { opacity: anims.infoFade }]}>
-            <Text style={styles.trackTitle} numberOfLines={2}>{safeTrack.title}</Text>
+            <Text style={styles.trackTitle} numberOfLines={1}>{safeTrack.title}</Text>
             <Text style={styles.trackArtist}>{safeTrack.artist}</Text>
             <View style={styles.ownerInfo}>
               <Text style={styles.ownerText}>appartient à </Text>
@@ -130,7 +187,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
                 <Image source={{ uri: correctPlayerObj.image }} style={styles.ownerAvatar} />
               ) : (
                 <View style={[styles.ownerAvatar, { backgroundColor: correctPlayerObj?.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Text style={{ fontSize: 12 }}>{correctPlayerObj?.emoji || '👤'}</Text>
+                    <Text style={{ fontSize: 10 }}>{correctPlayerObj?.emoji || '👤'}</Text>
                 </View>
               )}
               <Text style={styles.ownerName}>{correctPlayerObj?.name}</Text>
@@ -138,12 +195,57 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
           </Animated.View>
         </View>
 
+          {/* INDEPENDENTLY SCROLLABLE SCOREBOARD */}
+          <View style={styles.scoreboardWrapper}>
+            <Text style={styles.scoreboardTitle}>CLASSEMENT ACTUEL</Text>
+            <ScrollView 
+              style={styles.scoreboardScroll} 
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={styles.scoreboardContent}
+            >
+              {[...players]
+                .sort((a, b) => (playerScores[b.id] || 0) - (playerScores[a.id] || 0))
+                .map((player, index) => {
+                  const currentPScore = playerScores[player.id] || 0;
+                  const prevPScore = previousScores[player.id] || 0;
+                  const hasGainedPoints = currentPScore > prevPScore;
+                  
+                  return (
+                    <View key={player.id} style={[
+                      styles.scoreRow,
+                      hasGainedPoints ? styles.scoreRowCorrect : styles.scoreRowIncorrect
+                    ]}>
+                      <View style={styles.scorePlayerInfo}>
+                        <Text style={styles.rankNumber}>#{index + 1}</Text>
+                        {player.image ? (
+                          <Image source={{ uri: player.image }} style={styles.scoreAvatar} />
+                        ) : (
+                          <View style={[styles.scoreAvatar, { backgroundColor: player.color }]}>
+                            <Text style={{ fontSize: 14 }}>{player.emoji}</Text>
+                          </View>
+                        )}
+                        <Text style={styles.scorePlayerName} numberOfLines={1}>{player.name}</Text>
+                      </View>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text style={styles.scoreTotal}>{currentPScore} pts</Text>
+                        {hasGainedPoints && (
+                          <Text style={styles.pointsGainedText}>+{currentPScore - prevPScore}</Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+            </ScrollView>
+          </View>
+
         {/* FOOTER */}
         <Animated.View style={[styles.footer, { opacity: anims.buttonFade }]}>
           <PressableCard onPress={handleNext} style={{ width: '100%' }}>
             <LinearGradient colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.nextButton}>
-              <Text style={styles.nextButtonText}>{round >= maxRounds ? "Voir les scores" : "Manche Suivante"}</Text>
-              <Ionicons name="arrow-forward" color="white" size={24} />
+              <Text style={styles.nextButtonText}>
+                {round >= maxRounds ? "Voir les résultats" : `Manche Suivante (${autoNextTime}s)`}
+              </Text>
+              <Ionicons name={round >= maxRounds ? "stats-chart" : "arrow-forward"} color="white" size={24} />
             </LinearGradient>
           </PressableCard>
         </Animated.View>
@@ -156,111 +258,192 @@ const styles = StyleSheet.create({
   container: { flex: 1, justifyContent: 'space-between' },
   resultBanner: {
     margin: 16,
-    paddingVertical: 16,
-    paddingHorizontal: 24,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
     borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 16,
+    gap: 15,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
+    shadowRadius: 15,
+    elevation: 8,
+  },
+  bannerIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bannerTextContainer: {
+    flex: 1,
   },
   resultBannerText: {
-    flex: 1,
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '900',
     color: 'white',
-    letterSpacing: 1,
+    letterSpacing: 0.5,
   },
   scoreGained: {
-    fontSize: 20,
+    fontSize: 16,
     fontWeight: '800',
     color: 'white',
+    opacity: 0.9,
   },
   content: {
-    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 20,
+    paddingVertical: 10,
   },
   coverImage: {
-    width: width * 0.7,
-    height: width * 0.7,
-    borderRadius: 24,
+    width: width * 0.45,
+    height: width * 0.45,
+    borderRadius: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 15,
   },
   glow: {
     position: 'absolute',
     width: '100%',
     height: '100%',
-    borderRadius: 24,
+    borderRadius: 20,
     zIndex: -1,
   },
   glowCorrect: {
     shadowColor: COLORS.SPOTIFY_GREEN,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 1,
-    shadowRadius: 25,
+    shadowOpacity: 0.8,
+    shadowRadius: 20,
   },
   glowIncorrect: {
-    shadowColor: '#888',
+    shadowColor: '#FF6B6B',
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.7,
-    shadowRadius: 15,
+    shadowOpacity: 0.5,
+    shadowRadius: 12,
   },
   trackInfo: {
     alignItems: 'center',
-    marginTop: 24,
+    marginTop: 15,
     paddingHorizontal: 16,
   },
   trackTitle: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '900',
     color: 'white',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 4,
   },
   trackArtist: {
-    fontSize: 18,
+    fontSize: 15,
     fontWeight: '600',
     color: '#B3B3B3',
     textAlign: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
   },
   ownerInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 20,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    borderRadius: 15,
   },
   ownerText: {
     color: '#B3B3B3',
-    fontSize: 14,
+    fontSize: 12,
   },
   ownerAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    marginHorizontal: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginHorizontal: 6,
   },
   ownerName: {
     color: 'white',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  scoreboardWrapper: {
+    flex: 1, // This makes the scoreboard take all available space
+    paddingHorizontal: 20,
+    marginTop: 10,
+  },
+  scoreboardTitle: {
+    color: '#B3B3B3',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  scoreboardScroll: {
+    flex: 1,
+  },
+  scoreboardContent: {
+    paddingBottom: 10,
+  },
+  scoreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 12,
+    marginBottom: 6,
+    borderWidth: 1,
+  },
+  scoreRowCorrect: {
+    backgroundColor: 'rgba(29, 185, 84, 0.1)',
+    borderColor: 'rgba(29, 185, 84, 0.3)',
+  },
+  scoreRowIncorrect: {
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderColor: 'rgba(255, 107, 107, 0.3)',
+  },
+  scorePlayerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  rankNumber: {
+    color: '#B3B3B3',
+    fontSize: 12,
+    fontWeight: '900',
+    width: 25,
+  },
+  scoreAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  scorePlayerName: {
+    color: 'white',
     fontSize: 14,
     fontWeight: '700',
+    maxWidth: width * 0.45,
+  },
+  scoreTotal: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  pointsGainedText: {
+    color: COLORS.SPOTIFY_GREEN,
+    fontSize: 10,
+    fontWeight: '800',
+    marginTop: -2,
   },
   footer: {
     padding: 16,
   },
   nextButton: {
-    paddingVertical: 20,
+    paddingVertical: 16,
     borderRadius: 30,
     flexDirection: 'row',
     alignItems: 'center',

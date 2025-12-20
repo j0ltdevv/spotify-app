@@ -29,6 +29,7 @@ interface GameState {
 interface GameContextType extends GameState {
   startNewGame: (category: string) => void;
   markSetupAsComplete: () => void;
+  returnToLobby: () => Promise<void>;
   nextRound: () => void;
   updatePlayerScore: (playerId: string, score: number) => void;
   addPlayedTrack: (trackId: string) => void;
@@ -204,6 +205,27 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
   };
 
+  const returnToLobby = async () => {
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log("🔥 [GameContext] Returning to lobby and resetting scores...");
+    
+    // Reset all player scores to 0
+    const resetScores: PlayerScores = {};
+    gameState.players.forEach(p => {
+        resetScores[p.id] = 0;
+    });
+
+    await updateDoc(doc(db, 'games', activeGameDocId), {
+      status: 'READY',
+      currentRound: 1,
+      playerScores: resetScores,
+      playedTracks: [],
+      currentTrack: null,
+      isGameActive: true,
+      "setup.tracksPrepared": true // Keep tracks prepared if possible, or reset it
+    });
+  };
+
   const startNewGame = (category: string) => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
     console.log(`🔥 [GameContext] Starting new game. Category: ${category}`);
@@ -269,6 +291,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ...gameState,
     startNewGame,
     markSetupAsComplete,
+    returnToLobby,
     nextRound,
     updatePlayerScore,
     addPlayedTrack,

@@ -166,7 +166,6 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
             <PressableCard onPress={handleStartGame} style={{ width: '100%' }}>
                 <LinearGradient colors={!isHost || status !== 'READY' ? ['#555', '#444'] : (deezerTracks ? ['#A238FF', '#B560FF'] : [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT])} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }} style={styles.startButton}>
                     {getButtonContent()}
-                    <View style={styles.playerCountBadge}><Text style={styles.playerCountText}>{players.length}</Text></View>
                 </LinearGradient>
             </PressableCard>
         </View>
