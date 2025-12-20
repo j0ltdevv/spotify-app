@@ -2,9 +2,10 @@ import React, { createContext, useState, useContext, ReactNode, useCallback, use
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { STORAGE_KEYS, TOKEN_CONFIG } from '../constants';
 import { isTokenExpired, calculateExpiryTime, validateToken } from '../utils/spotifyRefresh';
-import { onAuthStateChanged, User, signInAnonymously, signOut, updateProfile } from 'firebase/auth'; // Import signInAnonymously and updateProfile
-import { app, auth } from '../services/FirebaseService'; // Import the Firebase app and auth instance
-import UserService from '../services/UserService'; // Import UserService
+import { onAuthStateChanged, User, signInAnonymously, signOut, updateProfile, deleteUser } from 'firebase/auth'; 
+import { doc, deleteDoc } from 'firebase/firestore';
+import { app, auth, db } from '../services/FirebaseService'; 
+import UserService from '../services/UserService'; 
 
 // 1. Définition des types pour le contexte
 interface AuthContextType {
@@ -14,8 +15,9 @@ interface AuthContextType {
   tokenExpiry: number | null;
   checkTokenValidity: () => Promise<boolean>;
   logout: () => Promise<void>;
-  firebaseUser: User | null; // Add Firebase user to context type
-  loginWithSpotifyFirebase: (accessToken: string) => Promise<void>; // New function for Firebase Spotify login
+  deleteAccount: () => Promise<void>; // New function
+  firebaseUser: User | null; 
+  loginWithSpotifyFirebase: (accessToken: string) => Promise<void>; 
 }
 
 // 2. Création du contexte
@@ -26,7 +28,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [tokenExpiry, setTokenExpiry] = useState<number | null>(null);
-  const [firebaseUser, setFirebaseUser] = useState<User | null>(null); // State for Firebase user
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null); 
 
   // Load token on startup
   useEffect(() => {
@@ -50,7 +52,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     };
     syncProfile();
-  }, [accessToken, firebaseUser]); // Dependencies: run when token or user changes
+  }, [accessToken, firebaseUser]); 
 
   // Listen for Firebase Auth state changes
   useEffect(() => {
@@ -78,7 +80,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       return () => clearInterval(interval);
     }
-  }, [accessToken, tokenExpiry, logout]); // Add logout to dependency array
+  }, [accessToken, tokenExpiry]); 
 
   const loadToken = async () => {
     try {
@@ -118,6 +120,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  // Clean logout
+  const logout = useCallback(async () => {
+    try {
+      await AsyncStorage.multiRemove([
+        STORAGE_KEYS.SPOTIFY_TOKEN, 
+        STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY,
+        STORAGE_KEYS.GAME_STATE
+      ]);
+      await signOut(auth); // Sign out from Firebase
+      setAccessToken(null);
+      setTokenExpiry(null);
+      setFirebaseUser(null);
+      console.log('✅ Déconnexion réussie');
+    } catch (error) {
+      console.error('❌ Erreur lors de la déconnexion:', error);
+    }
+  }, []);
+
   // Save the token
   const setToken = useCallback(async (token: string | null) => {
     setAccessToken(token);
@@ -144,8 +164,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const loginWithSpotifyFirebase = useCallback(async (spotifyAccessToken: string) => {
     try {
       setIsLoading(true);
-      // We use Anonymous auth to avoid requiring "Identity Platform" (which needs a credit card)
-      // The Spotify profile data will be linked manually in Firestore using the anonymous User ID
       const userCredential = await signInAnonymously(auth);
       console.log('✅ Authentifié anonymement sur Firebase (Plan Gratuit)');
 
@@ -196,23 +214,55 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return true;
   }, [accessToken, tokenExpiry, logout]);
 
-  // Clean logout
-  const logout = useCallback(async () => {
+  // Delete Account
+  const deleteAccount = useCallback(async () => {
+    if (!firebaseUser) return;
     try {
+      setIsLoading(true);
+      const uid = firebaseUser.uid;
+
+      console.log(`🗑️ Suppression du compte ${uid}...`);
+
+      // 1. Delete Firestore User Data
+      try {
+        await deleteDoc(doc(db, 'users', uid));
+        console.log('   ✅ Données utilisateur supprimées');
+      } catch (e) {
+        console.warn('   ⚠️ Erreur suppression données users (peut être déjà vide)', e);
+      }
+      
+      // 2. Delete Active Game (if host)
+      try {
+        await deleteDoc(doc(db, 'games', uid));
+        console.log('   ✅ Partie active supprimée');
+      } catch (e) {
+        console.warn('   ⚠️ Pas de partie active à supprimer', e);
+      }
+
+      // 3. Local Cleanup
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.SPOTIFY_TOKEN, 
         STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY,
         STORAGE_KEYS.GAME_STATE
       ]);
-      await signOut(auth); // Sign out from Firebase
+
+      // 4. Delete Firebase Auth User
+      await deleteUser(firebaseUser);
+      console.log('   ✅ Utilisateur Auth supprimé');
+      
       setAccessToken(null);
       setTokenExpiry(null);
       setFirebaseUser(null);
-      console.log('✅ Déconnexion réussie');
+      
     } catch (error) {
-      console.error('❌ Erreur lors de la déconnexion:', error);
+      console.error('❌ Erreur critique lors de la suppression du compte:', error);
+      // Force logout anyway
+      await logout();
+      throw error; 
+    } finally {
+      setIsLoading(false);
     }
-  }, []);
+  }, [firebaseUser, logout]);
 
   const value: AuthContextType = {
     accessToken,
@@ -221,8 +271,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     tokenExpiry,
     checkTokenValidity,
     logout,
-    firebaseUser, // Expose Firebase user
-    loginWithSpotifyFirebase, // Expose new login function
+    deleteAccount, // Add to context value
+    firebaseUser, 
+    loginWithSpotifyFirebase, 
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
