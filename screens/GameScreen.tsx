@@ -20,7 +20,6 @@ import PressableCard from '../components/PressableCard';
 import Logger from '../utils/logger';
 
 const { width } = Dimensions.get('window');
-const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 
 export default function GameScreen(props: {
   navigation: NativeStackNavigationProp<RootStackParamList, 'Game'>;
@@ -46,166 +45,275 @@ export default function GameScreen(props: {
   const { round = 1, category = 'TOP_RECENT', playerScores: initialScores, maxRounds = GAME_CONFIG.MAX_ROUNDS } = (route.params || {}) as any;
   
   const [currentTrack, setCurrentTrack] = useState<GameTrack | null>(null);
+  // Ref to hold the latest track object to avoid closure staleness in setInterval/timeouts
+  const currentTrackRef = useRef<GameTrack | null>(null);
+
   const [timeLeft, setTimeLeft] = useState(GAME_CONFIG.INITIAL_TIME);
+  const timeLeftRef = useRef(GAME_CONFIG.INITIAL_TIME); // ✅ Ref for synchronous timer access
+
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
   const [playerScores, setPlayerScores] = useState<PlayerScores>(initialScores || {});
+  const [screenStatus, setScreenStatus] = useState< 'PREPARING_ROUND' | 'PLAYING' | 'VOTED'>('PREPARING_ROUND');
   
-  // State Machine for the screen
-  type ScreenStatus = 'PREPARING_ROUND' | 'PLAYING' | 'VOTED';
-  const [screenStatus, setScreenStatus] = useState<ScreenStatus>('PREPARING_ROUND');
-  
-  // Refs
-  const roundLock = useRef(0); // Prevents duplicate logic execution for the same round
+  const roundLock = useRef(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const anims = {
-    loadingIcon: useRef(new Animated.Value(1)).current,
-    mainContent: useRef(new Animated.Value(0)).current
-  };
+  const anims = { loadingIcon: useRef(new Animated.Value(1)).current };
+
+  // Sync ref with state for track
+  useEffect(() => {
+    currentTrackRef.current = currentTrack;
+  }, [currentTrack]);
+
+  // --- 🔥 ROBUST TIMER LOGIC ---
+  // This effect is the ONLY master of time. It starts/stops based on screen status.
+  useEffect(() => {
+    // 1. Always clear existing timer first (Zombie killer)
+    if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+    }
+
+    // 2. Only start if we are strictly in PLAYING mode
+    if (screenStatus === 'PLAYING') {
+        console.log("🎮 [GameScreen] Status is PLAYING -> Starting NEW Timer.");
+        
+        // Reset values
+        timeLeftRef.current = GAME_CONFIG.INITIAL_TIME;
+        setTimeLeft(GAME_CONFIG.INITIAL_TIME);
+
+        timerRef.current = setInterval(() => {
+            timeLeftRef.current -= 1;
+            setTimeLeft(timeLeftRef.current); // Update UI
+
+            if (timeLeftRef.current <= 0) {
+                console.log("🎮 [GameScreen] Timer finished naturally.");
+                if (timerRef.current) clearInterval(timerRef.current);
+                handleTimeOut();
+            }
+        }, 1000);
+    } else {
+        console.log(`🎮 [GameScreen] Status is ${screenStatus} -> Timer stopped.`);
+    }
+
+    // 3. Cleanup on unmount or status change
+    return () => {
+        if (timerRef.current) {
+            clearInterval(timerRef.current);
+            timerRef.current = null;
+        }
+    };
+  }, [screenStatus]); // Only re-run when status changes
 
   // --- Core Game Flow ---
 
-  useFocusEffect(() => {
-    if (gameStatus !== 'playing') return;
-    if (round > maxRounds) {
-      navigation.replace('GameOver', { playerScores, players });
-      return;
-    }
-    if (roundLock.current === round) return;
+  const startRound = async (track: GameTrack) => {
+    console.log(`🎮 [GameScreen] startRound triggered for track: ${track.title} (ID: ${track.id})`);
+    
+    // Immediate ref update for safety
+    currentTrackRef.current = track;
+    setCurrentTrack(track);
 
-    let isActive = true;
-    const loadRoundData = async () => {
-      if (!isHost || !isActive) return;
+    try {
+      if (track.preview_url) {
+        console.log("🎮 [GameScreen] Requesting SoundManager to play...");
+        await SoundManager.playSound(track.preview_url, track.id);
+      } else {
+        console.warn("🎮 [GameScreen] No preview URL for this track.");
+        showToast("Aucun extrait audio pour ce titre.", "info");
+      }
       
-      roundLock.current = round;
-      setScreenStatus('PREPARING_ROUND');
-      setTimeLeft(GAME_CONFIG.INITIAL_TIME);
+      // ✅ This state change triggers the Timer useEffect above
+      setScreenStatus('PLAYING'); 
 
-      if (trackPool.length === 0) {
-        showToast("Le pot commun est vide ! Impossible de continuer.", "error");
-        await leaveGame();
-        navigation.navigate('Menu');
+    } catch (error) {
+      Logger.error("Erreur en démarrant le son", { error, track });
+      showToast("Cet extrait n'a pas pu être chargé.", "error");
+      if (isHost) {
+        roundLock.current = 0;
+        navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
+      }
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      console.log(`🎮 [GameScreen] Focus Effect triggered. Round: ${round}, Status: ${gameStatus}`);
+      if (gameStatus !== 'playing') return;
+      if (round > maxRounds) {
+        navigation.replace('GameOver', { playerScores, players });
         return;
       }
-
-      const playableTrackResult = await MusicService.findPlayableTrack(trackPool, contextPlayedTracks);
-
-      if (isActive && playableTrackResult.success && playableTrackResult.track) {
-        startRound(playableTrackResult.track);
-        setGameTrack(playableTrackResult.track);
-        addPlayedTrack(playableTrackResult.track.id);
-      } else if (isActive) {
-        showToast(playableTrackResult.error || "Aucune musique jouable n'a été trouvée.", "error");
-        await leaveGame();
-        navigation.navigate('Menu');
+      if (roundLock.current === round) {
+          console.log("🎮 [GameScreen] Round locked (already loaded), skipping loadRoundData.");
+          return;
       }
-    };
 
-    loadRoundData();
+      let isActive = true;
+      const loadRoundData = async () => {
+        console.log("🎮 [GameScreen] loadRoundData started...");
+        if (!isHost || !isActive) return;
+        
+        roundLock.current = round;
+        setScreenStatus('PREPARING_ROUND');
+        setSelectedPlayer(null);
+        setTimeLeft(GAME_CONFIG.INITIAL_TIME);
+        
+        // IMPORTANT: Reset shared track AND REF to avoid stale data triggering startRound early
+        setGameTrack(null);
+        currentTrackRef.current = null;
 
-    return () => {
-      isActive = false;
-      if (timerRef.current) clearInterval(timerRef.current);
-      stopSound(true);
-    };
-  });
-
-  // This effect listens for the track chosen by the host and starts the round for everyone.
-  useEffect(() => {
-    if (sharedTrack && sharedTrack.id !== currentTrack?.id) {
-      Logger.info(`New shared track received: ${sharedTrack.title}`);
-      
-      const startRound = async (track: GameTrack) => {
         try {
-          if (!track.preview_url) {
-            throw new Error("Preview URL is missing.");
-          }
-          await SoundManager.playSound(track.preview_url, track.id);
-          setCurrentTrack(track);
-          setScreenStatus('PLAYING');
+            if (trackPool.length === 0) {
+            showToast("Le pot commun est vide !", "error");
+            await leaveGame();
+            navigation.navigate('Menu');
+            return;
+            }
 
-          // Start countdown
-          if (timerRef.current) clearInterval(timerRef.current);
-          timerRef.current = setInterval(() => {
-            setTimeLeft(prev => {
-              if (prev <= 1) {
-                clearInterval(timerRef.current!);
-                handleTimeOut();
-                return 0;
-              }
-              return prev - 1;
-            });
-          }, 1000);
+            console.log("🎮 [GameScreen] Asking MusicService for a playable track...");
+            const playableTrackResult = await MusicService.findPlayableTrack(trackPool, contextPlayedTracks);
 
+            if (isActive && playableTrackResult.success && playableTrackResult.track) {
+            console.log(`🎮 [GameScreen] Track found! Setting as GameTrack: ${playableTrackResult.track.title}`);
+            setGameTrack(playableTrackResult.track);
+            addPlayedTrack(playableTrackResult.track.id);
+            } else if (isActive) {
+            console.warn("🎮 [GameScreen] No playable track found.");
+            showToast(playableTrackResult.error || "Aucune musique jouable trouvée.", "error");
+            await leaveGame();
+            navigation.navigate('Menu');
+            }
         } catch (error) {
-          Logger.error("Erreur en démarrant le son", { error, track });
-          showToast("Cet extrait n'a pas pu être chargé.", "error");
-          if (isHost) {
-            roundLock.current = 0; // Reset guard to allow refetch
-            navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
-          }
+            Logger.error("Erreur critique loadRoundData", error);
+            showToast("Erreur lors de la préparation de la manche.", "error");
+            await leaveGame();
+            navigation.navigate('Menu');
         }
       };
-      
-      startRound(sharedTrack as GameTrack);
-    }
-  }, [sharedTrack]);
 
-  // --- Handlers ---
+      loadRoundData();
+
+      return () => {
+        console.log("🎮 [GameScreen] Cleanup (Unfocus). Stopping sound.");
+        isActive = false;
+        if (timerRef.current) clearInterval(timerRef.current);
+        SoundManager.stopSound();
+      };
+    }, [round, isHost, gameStatus, trackPool, contextPlayedTracks])
+  );
+
+  useEffect(() => {
+    // Only start if we have a valid track, it's new, AND we are actually waiting for it
+    console.log(`🎮 [GameScreen] SharedTrack Effect. Shared: ${sharedTrack?.id}, Current: ${currentTrack?.id}, ScreenStatus: ${screenStatus}`);
+    
+    if (sharedTrack && sharedTrack.id !== currentTrack?.id && screenStatus === 'PREPARING_ROUND') {
+      console.log("🎮 [GameScreen] ✅ Condition met! Calling startRound.");
+      startRound(sharedTrack as GameTrack);
+    } else if (sharedTrack?.id === currentTrack?.id) {
+        console.log("🎮 [GameScreen] ⏳ Skipping startRound: Track ID matches current track.");
+    } else {
+        console.log("🎮 [GameScreen] ⏳ Condition NOT met. Waiting...");
+    }
+
+    // Cleanup timer on unmount or track change to prevent ghost timers
+    return () => {
+        if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [sharedTrack, screenStatus]);
+
+  // --- Core Game Flow ---
+
+  const startRound = async (track: GameTrack) => {
+    console.log(`🎮 [GameScreen] startRound triggered for track: ${track.title} (ID: ${track.id})`);
+    
+    // Immediate ref update for safety
+    currentTrackRef.current = track;
+    setCurrentTrack(track);
+
+    try {
+      if (track.preview_url) {
+        console.log("🎮 [GameScreen] Requesting SoundManager to play...");
+        // Explicitly stop previous sound to be safe
+        await SoundManager.stopSound();
+        await SoundManager.playSound(track.preview_url, track.id);
+      } else {
+        console.warn("🎮 [GameScreen] No preview URL for this track.");
+        showToast("Aucun extrait audio pour ce titre.", "info");
+      }
+      
+      // ✅ This state change triggers the Timer useEffect above
+      setScreenStatus('PLAYING'); 
+
+    } catch (error) {
+      Logger.error("Erreur en démarrant le son", { error, track });
+      showToast("Cet extrait n'a pas pu être chargé.", "error");
+      if (isHost) {
+        roundLock.current = 0;
+        navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
+      }
+    }
+  };
 
   const handleVoteAction = async (playerId: string) => {
-    Logger.debug(`Vote attempt for ${playerId}. Current screen status: ${screenStatus}`);
+    console.log(`🎮 [GameScreen] Vote action for player: ${playerId}`);
     if (screenStatus !== 'PLAYING') return;
     
     setScreenStatus('VOTED');
     setSelectedPlayer(playerId);
-    await stopSound();
+    await SoundManager.stopSound();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
-    const isCorrect = currentTrack?.correctPlayer === playerId;
-    let score = isCorrect ? 500 + (timeLeft * 30) : 0;
+    // Use REF here too just in case
+    const track = currentTrackRef.current;
     
+    const isCorrect = track?.correctPlayer === playerId;
+    const score = isCorrect ? 500 + (timeLeft * 30) : 0;
     const myPlayerId = firebaseUser?.uid;
     const newScores = { ...playerScores };
     
     if (myPlayerId && score > 0) {
       newScores[myPlayerId] = (newScores[myPlayerId] || 0) + score;
-      if (updatePlayerScore) {
-        updatePlayerScore(myPlayerId, score);
-      }
+      if (updatePlayerScore) updatePlayerScore(myPlayerId, score);
     }
 
     navigation.navigate('Reveal', { 
-        correctPlayer: players.find(p => p.id === currentTrack?.correctPlayer)?.name || '?',
-        track: currentTrack, 
+        correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?',
+        track: track, // Pass null/track explicitly
         score, round, playerScores: newScores, 
         selectedPlayer: playerId, category, maxRounds 
     });
   };
 
   const handleTimeOut = async () => {
-    await stopSound(true);
+    console.log("🎮 [GameScreen] handleTimeOut called.");
+    
+    // Use REF to get the latest track value, bypassing closure staleness
+    const track = currentTrackRef.current;
+    console.log(`🎮 [GameScreen] handleTimeOut using track: ${track?.title || 'NULL'}`);
+
+    if (!track) {
+        console.warn("⚠️ handleTimeOut blocked: No track available in ref. Ghost timer?");
+        return;
+    }
+
+    await SoundManager.stopSound();
     setScreenStatus('VOTED');
+
     navigation.navigate('Reveal', { 
-        correctPlayer: players.find(p => p.id === currentTrack?.correctPlayer)?.name || '?', 
-        track: currentTrack, score: 0, round, playerScores, 
+        correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?', 
+        track: track, // Pass the ref value
+        score: 0, round, playerScores, 
         selectedPlayer: undefined, category, maxRounds 
     });
   };
-
-  // --- Render ---
 
   if (screenStatus === 'PREPARING_ROUND') {
     return (
       <SafeContainer>
         <View style={styles.loadingContainer}>
-          <Animated.View style={[styles.loadingBadge, { transform: [{ scale: anims.loadingIcon }] }]}>
-            <Ionicons name="musical-notes" color={COLORS.SPOTIFY_GREEN} size={24} />
-          </Animated.View>
           <Text style={styles.loadingTitle}>MANCHE {round}</Text>
-          <View style={styles.loadingAnimation}>
-            <View style={styles.loadingCircle}><ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} /></View>
-          </View>
-          <View style={styles.loadingMessage}><Text style={styles.loadingText}>Recherche d'un extrait...</Text></View>
+          <ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} />
+          <Text style={styles.loadingText}>Préparation de la musique...</Text>
         </View>
       </SafeContainer>
     );
@@ -215,32 +323,43 @@ export default function GameScreen(props: {
     <SafeContainer>
       <View style={styles.container}>
         <View style={styles.header}><Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text></View>
-        <Animated.View style={styles.timerContainer}><CircularTimer timeLeft={timeLeft} maxTime={15} size={170} /></Animated.View>
-        <View style={styles.playersGrid}>{players.map(p => (<PressableCard key={p.id} style={styles.playerVoteWrapper} onPress={() => handleVoteAction(p.id)}><GlassCard style={[styles.playerVote, selectedPlayer === p.id && { borderColor: COLORS.SPOTIFY_GREEN }]}><View style={styles.playerVoteContent}><View style={styles.avatarContainer}>{p.image ? (<Image source={{ uri: p.image }} style={styles.avatarImage} />) : (<View style={[styles.avatar, { backgroundColor: p.color }]}><Text style={styles.avatarEmoji}>{p.emoji}</Text></View>)}</View><Text style={styles.playerVoteName} numberOfLines={1}>{p.name}</Text></View></GlassCard></PressableCard>))}</View>
+        <CircularTimer timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
+        <View style={styles.playersGrid}>
+          {players.map(p => (
+            <PressableCard key={p.id} style={styles.playerVoteWrapper} onPress={() => handleVoteAction(p.id)}>
+              <GlassCard style={[styles.playerVote, selectedPlayer === p.id && styles.playerVoteSelected]}>
+                  {p.image ? (
+                    <Image source={{ uri: p.image }} style={styles.avatarImage} />
+                  ) : (
+                    <View style={[styles.avatarImage, { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
+                        <Text style={{ fontSize: 40 }}>{p.emoji || '👤'}</Text>
+                    </View>
+                  )}
+                  <Text style={styles.playerVoteName} numberOfLines={1}>{p.name}</Text>
+                  {selectedPlayer === p.id && (
+                    <View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={18} color="#fff" /></View>
+                  )}
+              </GlassCard>
+            </PressableCard>
+          ))}
+        </View>
       </View>
     </SafeContainer>
   );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, justifyContent: 'space-between' },
-    header: { width: '100%', flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
-    roundIndicator: { color: COLORS.TEXT_PRIMARY, fontWeight: '800', fontSize: 16, letterSpacing: 0.5 },
-    timerContainer: { alignItems: 'center', marginBottom: 24 },
-    playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', width: '100%', gap: 16, paddingBottom: 20 },
-    playerVoteWrapper: { width: '45%' },
-    playerVote: { width: '100%', minHeight: 150, borderRadius: 20, borderWidth: 2, borderColor: 'transparent' },
-    playerVoteContent: { padding: 16, alignItems: 'center' },
-    avatarContainer: { marginBottom: 12, width: 80, height: 80 },
-    avatar: { width: '100%', height: '100%', borderRadius: 40, justifyContent: 'center', alignItems: 'center' },
-    avatarEmoji: { fontSize: 40 },
-    avatarImage: { width: '100%', height: '100%', borderRadius: 40 },
-    playerVoteName: { color: COLORS.TEXT_PRIMARY, fontSize: 15, fontWeight: '700', textAlign: 'center' },
-    loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
-    loadingBadge: { width: 60, height: 60, borderRadius: 30, backgroundColor: 'rgba(29, 185, 84, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 20, borderWidth: 2, borderColor: 'rgba(29, 185, 84, 0.3)' },
-    loadingTitle: { fontSize: 24, fontWeight: '900', color: COLORS.TEXT_PRIMARY, letterSpacing: 2, marginBottom: 8 },
-    loadingAnimation: { marginVertical: 40 },
-    loadingCircle: { width: 100, height: 100, borderRadius: 50, backgroundColor: 'rgba(29, 185, 84, 0.1)', justifyContent: 'center', alignItems: 'center', borderWidth: 3, borderColor: 'rgba(29, 185, 84, 0.3)' },
-    loadingMessage: { alignItems: 'center' },
-    loadingText: { fontSize: 18, fontWeight: '700', color: COLORS.TEXT_PRIMARY, marginBottom: 8 },
+  container: { flex: 1, paddingTop: 16, paddingHorizontal: 20, alignItems: 'center' },
+  header: { width: '100%', marginBottom: 20 },
+  roundIndicator: { color: 'white', fontWeight: '800', fontSize: 20, textAlign: 'center', letterSpacing: 1 },
+  playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 16, marginTop: 'auto', paddingBottom: 20 },
+  playerVoteWrapper: { width: '45%' },
+  playerVote: { padding: 8, alignItems: 'center', borderWidth: 3, borderColor: 'transparent', borderRadius: 20 },
+  playerVoteSelected: { borderColor: COLORS.SPOTIFY_GREEN },
+  avatarImage: { width: 100, height: 100, borderRadius: 50, marginBottom: 8 },
+  playerVoteName: { color: 'white', fontSize: 16, fontWeight: '700', textAlign: 'center' },
+  checkmarkBadge: { position: 'absolute', top: 5, right: 5, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.SPOTIFY_GREEN, justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 24 },
+  loadingTitle: { fontSize: 24, fontWeight: '900', color: 'white', letterSpacing: 2 },
+  loadingText: { fontSize: 18, fontWeight: '700', color: '#AAA' },
 });

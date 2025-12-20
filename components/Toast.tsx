@@ -16,7 +16,8 @@ export default function Toast({
   duration = 3000,
   onHide 
 }: ToastProps) {
-  const translateY = useRef(new Animated.Value(-100)).current;
+  // Start from bottom (100) instead of top (-100)
+  const translateY = useRef(new Animated.Value(100)).current;
   const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -39,7 +40,7 @@ export default function Toast({
     const timer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(translateY, {
-          toValue: -100,
+          toValue: 100, // Exit to bottom
           duration: 300,
           useNativeDriver: true,
         }),
@@ -92,7 +93,7 @@ export default function Toast({
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 60,
+    bottom: 50, // Moved from top: 60 to bottom: 50
     left: 20,
     right: 20,
     flexDirection: 'row',

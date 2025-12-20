@@ -54,14 +54,8 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
     if (isGuessCorrect) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showToast(`Bonne réponse ! +${Math.floor(score)}`, 'success');
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      if (selectedPlayer) {
-        showToast('Mauvaise réponse...', 'error');
-      } else {
-        showToast("Temps écoulé !", 'info');
-      }
     }
     
     // Animate everything in
@@ -75,17 +69,12 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       Animated.timing(anims.buttonFade, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
 
-    // Auto-advance to next round
-    nextRoundTimer.current = setTimeout(handleNext, 7000);
-
     return () => {
-      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
       SoundManager.stopSound();
     };
   }, []);
 
   const handleNext = () => {
-    if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     
     if (round >= maxRounds) {
@@ -122,7 +111,13 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
         
         <View style={styles.content}>
           <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
-            <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
+            {safeTrack.albumImage ? (
+                <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
+            ) : (
+                <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Ionicons name="musical-notes" size={80} color="#666" />
+                </View>
+            )}
             <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
           </Animated.View>
           
@@ -131,7 +126,13 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
             <Text style={styles.trackArtist}>{safeTrack.artist}</Text>
             <View style={styles.ownerInfo}>
               <Text style={styles.ownerText}>appartient à </Text>
-              <Image source={{ uri: correctPlayerObj?.image }} style={styles.ownerAvatar} />
+              {correctPlayerObj?.image ? (
+                <Image source={{ uri: correctPlayerObj.image }} style={styles.ownerAvatar} />
+              ) : (
+                <View style={[styles.ownerAvatar, { backgroundColor: correctPlayerObj?.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
+                    <Text style={{ fontSize: 12 }}>{correctPlayerObj?.emoji || '👤'}</Text>
+                </View>
+              )}
               <Text style={styles.ownerName}>{correctPlayerObj?.name}</Text>
             </View>
           </Animated.View>

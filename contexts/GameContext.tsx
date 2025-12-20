@@ -72,24 +72,31 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     let unsubscribe: () => void;
     if (!isAuthLoading && activeGameDocId && firebaseUser) {
+      console.log(`🔥 [GameContext] Subscribing to game doc: ${activeGameDocId}`);
       const gameDocRef = doc(db, 'games', activeGameDocId);
       unsubscribe = onSnapshot(gameDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const firestoreState = docSnap.data() as GameState;
+          console.log(`🔥 [GameContext] Snapshot received! Status: ${firestoreState.status}, Round: ${firestoreState.currentRound}, Track: ${firestoreState.currentTrack?.title}`);
           setGameState(firestoreState);
         } else {
+          console.log("🔥 [GameContext] Game document does not exist (or was deleted). Resetting state.");
           setGameState(getInitialGameState());
           setActiveGameDocId(null);
         }
       });
     }
     return () => {
-      if (unsubscribe) unsubscribe();
+      if (unsubscribe) {
+          console.log("🔥 [GameContext] Unsubscribing from game doc.");
+          unsubscribe();
+      }
     };
   }, [activeGameDocId, isAuthLoading, firebaseUser]);
 
   const createGame = async (): Promise<string> => {
     if (!firebaseUser) throw new Error("Must be logged in");
+    console.log("🔥 [GameContext] Creating new game...");
 
     if (activeGameDocId || gameState.roomCode) {
       await leaveGame();
@@ -121,19 +128,24 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await setDoc(doc(db, 'games', firebaseUser.uid), newGame);
         setGameState(newGame);
         setActiveGameDocId(firebaseUser.uid);
+        console.log(`🔥 [GameContext] Game created with code: ${code}`);
         return code;
     } catch(e) {
-        console.error("Create Game Error:", e);
+        console.error("🔥 [GameContext] Create Game Error:", e);
         throw e;
     }
   };
 
   const joinGame = async (code: string): Promise<boolean> => {
+    console.log(`🔥 [GameContext] Attempting to join game with code: ${code}`);
     if (!firebaseUser) return false;
 
     const q = query(collection(db, 'games'), where("roomCode", "==", code));
     const querySnapshot = await getDocs(q);
-    if (querySnapshot.empty) return false;
+    if (querySnapshot.empty) {
+        console.warn("🔥 [GameContext] No game found with this code.");
+        return false;
+    }
 
     const gameDoc = querySnapshot.docs[0];
     const gameData = gameDoc.data() as GameState;
@@ -152,26 +164,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           players: arrayUnion(JSON.parse(JSON.stringify(newPlayer))),
           [`playerScores.${firebaseUser.uid}`]: 0
       });
+      console.log("🔥 [GameContext] Player added to game.");
     }
     setActiveGameDocId(hostUid);
     return true;
   };
 
   const leaveGame = async () => {
+    console.log("🔥 [GameContext] Leaving game...");
     if (!firebaseUser || !activeGameDocId) return;
     try {
       if (activeGameDocId === firebaseUser.uid) {
+        console.log("🔥 [GameContext] Host leaving -> Deleting game doc.");
         await deleteDoc(doc(db, 'games', firebaseUser.uid));
       } else {
         const playerToRemove = gameState.players.find(p => p.id === firebaseUser.uid);
         if (playerToRemove) {
+          console.log("🔥 [GameContext] Player leaving -> Removing from player list.");
           await updateDoc(doc(db, 'games', activeGameDocId), {
             players: arrayRemove(playerToRemove)
           });
         }
       }
     } catch(e) {
-      console.warn("Error during leaveGame (ignoring):", e);
+      console.warn("🔥 [GameContext] Error during leaveGame (ignoring):", e);
     } finally {
       setActiveGameDocId(null);
       setGameState(getInitialGameState());
@@ -180,6 +196,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const markSetupAsComplete = () => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log("🔥 [GameContext] Marking setup as complete.");
     updateDoc(doc(db, 'games', activeGameDocId), {
       "setup.tracksPrepared": true,
       "setup.preparedAt": serverTimestamp(),
@@ -189,6 +206,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const startNewGame = (category: string) => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] Starting new game. Category: ${category}`);
     const updates = {
       category,
       status: 'playing',
@@ -200,6 +218,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const nextRound = () => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] Requesting next round. Current: ${gameState.currentRound}`);
     if (gameState.currentRound >= (gameState.players.length * 2)) { // Example logic
       updateDoc(doc(db, 'games', activeGameDocId), { status: 'finished' });
     } else {
@@ -209,6 +228,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updatePlayerScore = (playerId: string, score: number) => {
     if (!activeGameDocId) return;
+    console.log(`🔥 [GameContext] Updating score for ${playerId}: +${score}`);
     const currentScore = gameState.playerScores[playerId] || 0;
     updateDoc(doc(db, 'games', activeGameDocId), { [`playerScores.${playerId}`]: currentScore + score });
   };
@@ -220,6 +240,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const setGameTrack = (track: any) => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] Setting shared game track: ${track?.title || 'NULL'}`);
     updateDoc(doc(db, 'games', activeGameDocId), { currentTrack: track });
   };
 

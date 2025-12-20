@@ -1,232 +1,111 @@
-/**
- * SoundManager.ts
- * Gestionnaire centralisé des sons (Singleton)
- * Objectif : Éviter les fuites mémoire, les superpositions audio et les crashs
- */
+import { Audio } from "expo-av";
 
-import { Audio } from 'expo-av';
+let sound: Audio.Sound | null = null;
+let currentTrackId: string | null = null;
 
-/**
- * État du gestionnaire de son
- */
-interface SoundState {
-  sound: Audio.Sound | null;
-  isPlaying: boolean;
-  currentTrackId: string | null;
-}
-
-/**
- * Callback pour les événements de lecture
- */
-export type PlaybackStatusCallback = (isPlaying: boolean) => void;
-
-/**
- * Options de lecture
- */
-export interface PlaySoundOptions {
-  shouldLoop?: boolean;
-  volume?: number;
-  onPlaybackStatusUpdate?: PlaybackStatusCallback;
-}
-
-/**
- * Gestionnaire de sons singleton
- * Garantit qu'un seul son est joué à la fois et gère le cycle de vie complet
- */
-class SoundManager {
-  private static instance: SoundManager;
-  private state: SoundState;
-  private isInitialized: boolean = false;
-
-  private constructor() {
-    this.state = {
-      sound: null,
-      isPlaying: false,
-      currentTrackId: null,
-    };
-  }
-
+const SoundManager = {
   /**
-   * Singleton pattern
+   * Initializes the Audio session for the app.
+   * This is safe to call multiple times.
    */
-  public static getInstance(): SoundManager {
-    if (!SoundManager.instance) {
-      SoundManager.instance = new SoundManager();
-    }
-    return SoundManager.instance;
-  }
-
-  /**
-   * Initialise le mode audio (à appeler au démarrage de l'app)
-   */
-  public async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
+  async initialize() {
+    console.log("🔊 [SoundManager] Initializing audio session...");
     try {
       await Audio.setAudioModeAsync({
         playsInSilentModeIOS: true,
         staysActiveInBackground: false,
         shouldDuckAndroid: true,
       });
-      this.isInitialized = true;
-      console.log('✅ SoundManager initialisé');
+      console.log("🔊 [SoundManager] ✅ Audio mode initialized successfully");
     } catch (error) {
-      console.error('❌ Erreur initialisation audio:', error);
+      console.error("🔊 [SoundManager] ❌ Failed to set audio mode:", error);
+    }
+  },
+
+  /**
+   * Plays a sound from a given URI. Stops any previously playing sound.
+   * @param uri The audio URI to play.
+   * @param trackId A unique ID for the track being played.
+   */
+  async playSound(uri: string, trackId: string) {
+    console.log(`🔊 [SoundManager] Request to play track: ${trackId}`);
+    
+    // 🛡️ Prevent duplicate playback of the same track
+    if (currentTrackId === trackId && sound) {
+        console.log(`🔊 [SoundManager] ⏭️ Track ${trackId} is already playing. Skipping duplicate request.`);
+        return;
+    }
+
+    if (!uri) {
+      console.warn("🔊 [SoundManager] ⛔ URI is invalid/empty, playback aborted.");
+      return;
+    }
+
+    try {
+      // Stop existing sound if any
+      if (sound) {
+        console.log("🔊 [SoundManager] Stopping previous sound before playing new one...");
+        try {
+          await sound.stopAsync();
+          await sound.unloadAsync();
+          console.log("🔊 [SoundManager] Previous sound unloaded.");
+        } catch (error) {
+           console.warn('🔊 [SoundManager] ⚠️ Error unloading previous sound:', error);
+        }
+        sound = null;
+        currentTrackId = null; // Reset ID while switching
+      }
+
+      console.log(`🔊 [SoundManager] Loading audio resource...`);
+      const { sound: newSound, status } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true }
+      );
+      
+      sound = newSound;
+      currentTrackId = trackId;
+      console.log(`🔊 [SoundManager] ✅ Playback started! Track: ${trackId}`, status);
+    } catch (error) {
+      console.error(`🔊 [SoundManager] ❌ playSound error for track ${trackId}:`, error);
+      sound = null;
+      currentTrackId = null;
       throw error;
     }
-  }
+  },
 
   /**
-   * Charge et joue un son depuis une URL
+   * Stops and unloads the currently playing sound.
    */
-  public async playSound(
-    audioUrl: string,
-    trackId: string,
-    options: PlaySoundOptions = {}
-  ): Promise<boolean> {
+  async stopSound() {
+    console.log("🔊 [SoundManager] stopSound called.");
+    if (!sound) {
+        console.log("🔊 [SoundManager] No sound to stop.");
+        return;
+    }
     try {
-      // Arrêter le son précédent s'il existe
-      await this.stopSound();
-
-      console.log(`🔊 Chargement audio pour track: ${trackId}`);
-      console.log(`🔊 URL: ${audioUrl}`);
-
-      // Créer et charger le nouveau son
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: audioUrl },
-        {
-          shouldPlay: false,
-          isLooping: options.shouldLoop || false,
-          volume: options.volume || 1.0,
-        }
-      );
-
-      console.log('✅ Audio créé avec succès');
-
-      // Écouter les changements de statut
-      newSound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded) {
-          const isPlaying = status.isPlaying || false;
-          this.state.isPlaying = isPlaying;
-
-          // Callback optionnel
-          if (options.onPlaybackStatusUpdate) {
-            options.onPlaybackStatusUpdate(isPlaying);
-          }
-
-          // Fin de lecture
-          if (status.didJustFinish) {
-            console.log('⏹️ Lecture terminée');
-            this.state.isPlaying = false;
-            if (options.onPlaybackStatusUpdate) {
-              options.onPlaybackStatusUpdate(false);
-            }
-          }
-        }
-      });
-
-      // Mettre à jour l'état
-      this.state.sound = newSound;
-      this.state.currentTrackId = trackId;
-
-      // Jouer le son
-      await newSound.playAsync();
-      this.state.isPlaying = true;
-
-      console.log(`✅ Lecture démarrée pour track: ${trackId}`);
-      return true;
-
+      await sound.stopAsync();
+      await sound.unloadAsync();
+      console.log("🔊 [SoundManager] Sound stopped and unloaded successfully.");
     } catch (error) {
-      console.error('❌ Erreur playSound:', error);
-      return false;
+      console.warn('🔊 [SoundManager] ⚠️ Error during sound unload:', error);
+    } finally {
+      sound = null;
+      currentTrackId = null;
     }
-  }
+  },
 
   /**
-   * Met en pause le son en cours
+   * Cleans up the sound manager state.
    */
-  public async pauseSound(): Promise<void> {
-    if (this.state.sound && this.state.isPlaying) {
-      try {
-        await this.state.sound.pauseAsync();
-        this.state.isPlaying = false;
-        console.log('⏸️ Son mis en pause');
-      } catch (error) {
-        console.error('❌ Erreur pauseSound:', error);
-      }
+  cleanup() {
+    console.log("🔊 [SoundManager] Cleanup requested.");
+    // We can't await here easily if called synchronously, but we should try to stop.
+    if (sound) {
+      sound.unloadAsync().catch(err => console.warn("🔊 [SoundManager] Error cleaning up sound:", err));
+      sound = null;
     }
+    currentTrackId = null;
   }
+};
 
-  /**
-   * Reprend la lecture
-   */
-  public async resumeSound(): Promise<void> {
-    if (this.state.sound && !this.state.isPlaying) {
-      try {
-        await this.state.sound.playAsync();
-        this.state.isPlaying = true;
-        console.log('▶️ Lecture reprise');
-      } catch (error) {
-        console.error('❌ Erreur resumeSound:', error);
-      }
-    }
-  }
-
-  /**
-   * Arrête et décharge le son en cours
-   */
-  public async stopSound(): Promise<void> {
-    if (this.state.sound) {
-      try {
-        console.log('🛑 Arrêt du son en cours...');
-        await this.state.sound.stopAsync();
-        await this.state.sound.unloadAsync();
-        console.log('✅ Son arrêté et déchargé');
-      } catch (error) {
-        console.warn('⚠️ Erreur stopSound:', error);
-      } finally {
-        this.state.sound = null;
-        this.state.isPlaying = false;
-        this.state.currentTrackId = null;
-      }
-
-      // Délai de sécurité pour la libération de la mémoire
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-  }
-
-  /**
-   * Récupère l'état de lecture actuel
-   */
-  public getPlaybackState(): { isPlaying: boolean; currentTrackId: string | null } {
-    return {
-      isPlaying: this.state.isPlaying,
-      currentTrackId: this.state.currentTrackId,
-    };
-  }
-
-  /**
-   * Vérifie si un son est en cours de lecture
-   */
-  public isCurrentlyPlaying(): boolean {
-    return this.state.isPlaying;
-  }
-
-  /**
-   * Récupère l'ID du track en cours
-   */
-  public getCurrentTrackId(): string | null {
-    return this.state.currentTrackId;
-  }
-
-  /**
-   * Nettoie complètement le gestionnaire (à appeler lors de la déconnexion)
-   */
-  public async cleanup(): Promise<void> {
-    await this.stopSound();
-    this.isInitialized = false;
-    console.log('🗑️ SoundManager nettoyé');
-  }
-}
-
-export default SoundManager.getInstance();
+export default SoundManager;

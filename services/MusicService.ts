@@ -434,51 +434,27 @@ class MusicService {
       return prefetched;
     }
 
-    console.log(`\n🔍 Recherche RAPIDE d'un track jouable parmi ${tracks.length} tracks`);
-    
-    // Mélanger et filtrer les tracks déjà joués
-    const shuffledTracks = shuffleArray(tracks);
-    const availableTracks = shuffledTracks.filter(track => 
-      !excludedTrackIds.includes(track.id)
+    // Filtrer et mélanger les tracks
+    const availableTracks = shuffleArray(
+        tracks.filter(t => !excludedTrackIds.includes(t.id))
     );
 
-    if (availableTracks.length === 0) {
-      return { track: null, success: false, error: 'Aucun track disponible' };
-    }
+    console.log(`\n🔍 Recherche séquentielle d'un track jouable parmi ${availableTracks.length} tracks...`);
 
-    // --- RECHERCHE PAR BATCHES (PARALLÈLE) ---
-    const BATCH_SIZE = 3; // Tester 3 musiques en même temps
-    const TOTAL_LIMIT = Math.min(maxAttempts, availableTracks.length);
-    
-    for (let i = 0; i < TOTAL_LIMIT; i += BATCH_SIZE) {
-      const batch = availableTracks.slice(i, i + BATCH_SIZE);
-      console.log(`\n🚀 Lancement du batch ${Math.floor(i/BATCH_SIZE) + 1} (${batch.length} tracks)...`);
-      
-      // Lancer les vérifications en parallèle
-      const promises = batch.map(track => this.checkSingleTrack(track));
-      const results = await Promise.all(promises);
-
-      // Trouver le premier succès dans le batch
-      const winner = results.find(res => res && res.success);
-      
-      if (winner) {
-        console.log(`\n🏆 GAGNANT TROUVÉ dans le batch !`);
-        return winner;
+    for (const track of availableTracks) {
+      const result = await this.checkSingleTrack(track);
+      if (result && result.success) {
+        console.log(`\n🏆 GAGNANT TROUVÉ: ${result.track?.title}`);
+        // Prefetch the next one in the background without waiting for it
+        this.prefetchNextTrack(availableTracks, [...excludedTrackIds, result.track!.id]);
+        return result;
       }
-      
-      console.log(`   ❌ Aucun succès dans ce batch, on continue...`);
-    }
-
-    // MODE DÉGRADÉ
-    if (!degradedMode) {
-      console.log(`\n🔄 Mode dégradé activé...`);
-      return await this.findPlayableTrack(tracks, excludedTrackIds, 30, true);
     }
 
     return {
       track: null,
       success: false,
-      error: 'Aucun extrait audio trouvé'
+      error: 'Aucun extrait audio trouvé après avoir tout scanné.'
     };
   }
 
