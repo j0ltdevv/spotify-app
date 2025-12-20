@@ -6,8 +6,9 @@
 
 import { API_ENDPOINTS } from '../config';
 import { SpotifyUser } from '../types';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore'; // Import Firestore modules
-import { app } from './FirebaseService'; // Import the Firebase app
+import { doc, getDoc, setDoc } from 'firebase/firestore'; // Import Firestore modules
+import { db } from './FirebaseService'; // Import the Firebase app
+
 
 /**
  * Interface for user profile stored in Firestore
@@ -25,8 +26,7 @@ export interface UserProfileResult {
   error?: string;
 }
 
-// Initialize Firestore
-const db = getFirestore(app);
+
 
 /**
  * Service de gestion des utilisateurs
