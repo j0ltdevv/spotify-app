@@ -36,7 +36,8 @@ export default function GameScreen(props: {
     leaveGame, 
     updatePlayerScore,
     addPlayedTrack,
-    playedTracks: contextPlayedTracks
+    playedTracks: contextPlayedTracks,
+    activeGameDocId
   } = useGame();
   
   const { firebaseUser } = useAuth();
@@ -44,6 +45,14 @@ export default function GameScreen(props: {
 
   const { round = 1, category = 'TOP_RECENT', playerScores: initialScores, maxRounds = GAME_CONFIG.MAX_ROUNDS } = (route.params || {}) as any;
   
+  // -- Automatic session cleanup --
+  useEffect(() => {
+    if (!activeGameDocId && gameStatus !== 'playing') {
+      console.log("🎮 [GameScreen] No active game detected. Returning to Menu.");
+      navigation.navigate('Menu');
+    }
+  }, [activeGameDocId, gameStatus]);
+
   const [currentTrack, setCurrentTrack] = useState<GameTrack | null>(null);
   // Ref to hold the latest track object to avoid closure staleness in setInterval/timeouts
   const currentTrackRef = useRef<GameTrack | null>(null);

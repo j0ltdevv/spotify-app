@@ -62,6 +62,9 @@ class MusicService {
   // Préchargement du prochain track
   private nextTrackPromise: Promise<PlayableTrackResult> | null = null;
 
+  // Historique local pour éviter les doublons immédiats (protection latence Firestore)
+  private recentHistory: Set<string> = new Set();
+
   private constructor() {}
 
   /**
@@ -72,6 +75,19 @@ class MusicService {
       MusicService.instance = new MusicService();
     }
     return MusicService.instance;
+  }
+
+  /**
+   * Réinitialise le service pour une nouvelle partie
+   */
+  public reset(): void {
+    console.log("🧹 [MusicService] Réinitialisation de l'historique et des préchargements.");
+    if (this.recentHistory) {
+      this.recentHistory.clear();
+    } else {
+      this.recentHistory = new Set();
+    }
+    this.nextTrackPromise = null;
   }
 
   /**
@@ -120,17 +136,26 @@ class MusicService {
     maxAttempts: number = 15
   ): void {
     console.log(`\n⏩ Préchargement du prochain track en arrière-plan...`);
-    this.nextTrackPromise = this.findPlayableTrack(tracks, excludedTrackIds, maxAttempts);
+    this.nextTrackPromise = this.findPlayableTrack(tracks, excludedTrackIds, maxAttempts, false, true);
   }
 
   /**
    * Utilise le track préchargé s'il est disponible
    */
-  private async usePrefetchedTrack(): Promise<PlayableTrackResult | null> {
+  private async usePrefetchedTrack(
+    tracks: SpotifyTrack[],
+    excludedTrackIds: string[]
+  ): Promise<PlayableTrackResult | null> {
     if (this.nextTrackPromise) {
       console.log(`\n🚀 Utilisation du track préchargé !`);
       const result = await this.nextTrackPromise;
       this.nextTrackPromise = null;
+
+      if (result.success && result.track) {
+        this.recentHistory.add(result.track.id);
+        this.prefetchNextTrack(tracks, [...excludedTrackIds, result.track.id]);
+      }
+
       return result;
     }
     return null;
@@ -419,6 +444,47 @@ class MusicService {
   }
 
   /**
+   * Génère une playlist complète et vérifiée pour une partie
+   * @param tracks Pool de tracks disponibles
+   * @param count Nombre de tracks nécessaires
+   * @returns Liste de GameTrack vérifiés (avec preview)
+   */
+  public async generateVerifiedPlaylist(
+    tracks: SpotifyTrack[],
+    count: number
+  ): Promise<GameTrack[]> {
+    console.log(`\n🏗️ Génération d'une playlist vérifiée de ${count} titres...`);
+    
+    // 1. Dédupliquer par ID
+    const uniqueTracksMap = new Map<string, SpotifyTrack>();
+    tracks.forEach(t => {
+      if (t.id && !uniqueTracksMap.has(t.id)) {
+        uniqueTracksMap.set(t.id, t);
+      }
+    });
+    
+    // 2. Mélanger
+    let pool = shuffleArray(Array.from(uniqueTracksMap.values()));
+    const verifiedPlaylist: GameTrack[] = [];
+    
+    console.log(`   📦 Pool initial : ${pool.length} titres uniques.`);
+
+    // 3. Vérifier séquentiellement jusqu'à avoir assez de titres
+    for (const track of pool) {
+      if (verifiedPlaylist.length >= count) break;
+      
+      const result = await this.checkSingleTrack(track);
+      if (result && result.success && result.track) {
+        verifiedPlaylist.push(result.track);
+        console.log(`   ✅ [${verifiedPlaylist.length}/${count}] ${result.track.title} validé.`);
+      }
+    }
+
+    console.log(`\n✨ Playlist terminée : ${verifiedPlaylist.length} titres prêts.`);
+    return verifiedPlaylist;
+  }
+
+  /**
    * Trouve un track jouable avec preview audio (iTunes prioritaire)
    * VERSION OPTIMISÉE : Recherche par lots parallèles
    */
@@ -426,27 +492,39 @@ class MusicService {
     tracks: SpotifyTrack[],
     excludedTrackIds: string[],
     maxAttempts: number = 15,
-    degradedMode: boolean = false
+    degradedMode: boolean = false,
+    isPrefetch: boolean = false
   ): Promise<PlayableTrackResult> {
-    // Vérifier si on peut utiliser un track préchargé
-    const prefetched = await this.usePrefetchedTrack();
-    if (prefetched && prefetched.success) {
-      return prefetched;
+    // Si ce n'est PAS un prefetch, on essaie d'utiliser ce qui a été préchargé
+    if (!isPrefetch) {
+      const prefetched = await this.usePrefetchedTrack(tracks, excludedTrackIds);
+      if (prefetched && prefetched.success) {
+        if (prefetched.track && !excludedTrackIds.includes(prefetched.track.id) && !this.recentHistory.has(prefetched.track.id)) {
+          return prefetched;
+        }
+      }
     }
 
     // Filtrer et mélanger les tracks
     const availableTracks = shuffleArray(
-        tracks.filter(t => !excludedTrackIds.includes(t.id))
+        tracks.filter(t => !excludedTrackIds.includes(t.id) && !this.recentHistory.has(t.id))
     );
 
-    console.log(`\n🔍 Recherche séquentielle d'un track jouable parmi ${availableTracks.length} tracks...`);
+    console.log(`\n🔍 Recherche séquentielle d'un track jouable parmi ${availableTracks.length} tracks... (Mode Prefetch: ${isPrefetch})`);
 
     for (const track of availableTracks) {
       const result = await this.checkSingleTrack(track);
       if (result && result.success) {
         console.log(`\n🏆 GAGNANT TROUVÉ: ${result.track?.title}`);
-        // Prefetch the next one in the background without waiting for it
-        this.prefetchNextTrack(availableTracks, [...excludedTrackIds, result.track!.id]);
+        
+        if (result.track) {
+          this.recentHistory.add(result.track.id);
+        }
+
+        if (!isPrefetch) {
+          this.prefetchNextTrack(tracks, [...excludedTrackIds, result.track!.id]);
+        }
+        
         return result;
       }
     }

@@ -3,6 +3,7 @@ import { doc, onSnapshot, setDoc, query, collection, where, getDocs, updateDoc, 
 import { db } from '../services/FirebaseService';
 import { useAuth } from './AuthContext';
 import UserService from '../services/UserService';
+import MusicService from '../services/MusicService';
 import { getBestImage, getRandomColor, getRandomEmoji } from '../utils/userUtils';
 import { GameTrack, PlayerScores, Player, SpotifyTrack } from '../types';
 
@@ -19,6 +20,7 @@ interface GameState {
   players: Player[];
   status: 'waiting' | 'READY' | 'playing' | 'finished';
   currentTrack?: any;
+  playlist?: GameTrack[]; // Verified sequence of tracks
   trackPool: SpotifyTrack[];
   setup: {
     tracksPrepared: boolean;
@@ -34,6 +36,7 @@ interface GameContextType extends GameState {
   updatePlayerScore: (playerId: string, score: number) => void;
   addPlayedTrack: (trackId: string) => void;
   setGameTrack: (track: any) => void;
+  setGamePlaylist: (playlist: GameTrack[]) => void;
   addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>;
   addBots: () => Promise<void>;
   resetGame: () => Promise<void>;
@@ -57,6 +60,7 @@ const getInitialGameState = (): GameState => ({
   players: [],
   status: 'waiting',
   currentTrack: null,
+  playlist: [],
   trackPool: [],
   setup: {
     tracksPrepared: false,
@@ -69,6 +73,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [gameState, setGameState] = useState<GameState>(getInitialGameState());
   const { firebaseUser, isLoading: isAuthLoading, accessToken } = useAuth();
   const [activeGameDocId, setActiveGameDocId] = useState<string | null>(null);
+  
+  // Optimistic local storage for played tracks to avoid latency issues
+  const [localPlayedTracks, setLocalPlayedTracks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     let unsubscribe: () => void;
@@ -84,6 +91,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.log("🔥 [GameContext] Game document does not exist (or was deleted). Resetting state.");
           setGameState(getInitialGameState());
           setActiveGameDocId(null);
+          setLocalPlayedTracks(new Set()); // Clear local history on reset
         }
       });
     }
@@ -98,6 +106,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const createGame = async (): Promise<string> => {
     if (!firebaseUser) throw new Error("Must be logged in");
     console.log("🔥 [GameContext] Creating new game...");
+    
+    setLocalPlayedTracks(new Set()); 
+    MusicService.reset(); // Clear music history
 
     if (activeGameDocId || gameState.roomCode) {
       await leaveGame();
@@ -192,6 +203,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } finally {
       setActiveGameDocId(null);
       setGameState(getInitialGameState());
+      setLocalPlayedTracks(new Set()); // CRITICAL: Reset local played tracks history
     }
   };
 
@@ -207,8 +219,10 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const returnToLobby = async () => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log("🔥 [GameContext] Returning to lobby and resetting scores...");
+    console.log("🔥 [GameContext] Returning to lobby and resetting game data...");
     
+    MusicService.reset(); // Reset local music state
+
     // Reset all player scores to 0
     const resetScores: PlayerScores = {};
     gameState.players.forEach(p => {
@@ -216,13 +230,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     });
 
     await updateDoc(doc(db, 'games', activeGameDocId), {
-      status: 'READY',
+      status: 'waiting', // Change to waiting to allow fresh track loading
       currentRound: 1,
       playerScores: resetScores,
       playedTracks: [],
       currentTrack: null,
+      playlist: [], // Clear old playlist
+      trackPool: [], // Clear old pool
       isGameActive: true,
-      "setup.tracksPrepared": true // Keep tracks prepared if possible, or reset it
+      "setup.tracksPrepared": false // Allow reloading tracks
     });
   };
 
@@ -233,7 +249,9 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       category,
       status: 'playing',
       currentRound: 1,
-      gameId: Date.now()
+      gameId: Date.now(),
+      playedTracks: [], // Reset played tracks for new match
+      currentTrack: null // Reset shared track
     };
     updateDoc(doc(db, 'games', activeGameDocId), updates);
   };
@@ -257,6 +275,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const addPlayedTrack = (trackId: string) => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    
+    // Optimistic update
+    setLocalPlayedTracks(prev => {
+        const newSet = new Set(prev);
+        newSet.add(trackId);
+        return newSet;
+    });
+    
     updateDoc(doc(db, 'games', activeGameDocId), { playedTracks: arrayUnion(trackId) });
   };
 
@@ -264,6 +290,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
     console.log(`🔥 [GameContext] Setting shared game track: ${track?.title || 'NULL'}`);
     updateDoc(doc(db, 'games', activeGameDocId), { currentTrack: track });
+  };
+
+  const setGamePlaylist = (playlist: GameTrack[]) => {
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] Setting shared game playlist: ${playlist.length} tracks`);
+    updateDoc(doc(db, 'games', activeGameDocId), { playlist });
   };
 
   const addToTrackPool = async (tracks: SpotifyTrack[]) => {
@@ -287,8 +319,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const resetGame = async () => { await leaveGame(); };
 
+  // Merge Firestore state with optimistic local state
+  const mergedPlayedTracks = Array.from(new Set([
+      ...gameState.playedTracks,
+      ...Array.from(localPlayedTracks)
+  ]));
+
   const value: GameContextType = {
     ...gameState,
+    playedTracks: mergedPlayedTracks, // Use merged list
     startNewGame,
     markSetupAsComplete,
     returnToLobby,
@@ -296,6 +335,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     updatePlayerScore,
     addPlayedTrack,
     setGameTrack,
+    setGamePlaylist,
     addToTrackPool,
     addBots,
     resetGame,

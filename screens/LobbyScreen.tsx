@@ -25,13 +25,18 @@ const { width } = Dimensions.get('window');
 
 export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
   const { accessToken, firebaseUser } = useAuth();
-  const { players, roomCode, isHost, leaveGame, status, startNewGame, addToTrackPool, addBots, setup, markSetupAsComplete } = useGame(); 
+  const { 
+    players, roomCode, isHost, leaveGame, status, startNewGame, 
+    addToTrackPool, addBots, setup, markSetupAsComplete,
+    trackPool, setGamePlaylist
+  } = useGame(); 
   
   const { showToast } = useToast();
   
   const [selectedCategory, setSelectedCategory] = useState<string>(CATEGORIES[0].key);
   const [selectedGameMode, setSelectedGameMode] = useState<string>(GAME_MODES[0].key);
   const [isSharingTracks, setIsSharingTracks] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
 
   const deezerTracks = route.params?.tracks;
 
@@ -71,7 +76,6 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
     shareUserTracks();
   }, [selectedCategory, roomCode, accessToken, firebaseUser, isHost, setup, addToTrackPool, markSetupAsComplete]);
 
-  // Effect to navigate when game starts
   useEffect(() => {
     if (status === 'playing') {
       const selectedMode = GAME_MODES.find(mode => mode.key === selectedGameMode);
@@ -85,6 +89,8 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
           tracks: deezerTracks,
           maxRounds 
       });
+    } else if (status === 'waiting') {
+      setIsStarting(false);
     }
   }, [status, navigation, selectedCategory, deezerTracks, selectedGameMode]);
 
@@ -97,7 +103,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
     );
   };
   
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     if (!isHost) {
       showToast("Seul l'hôte peut lancer la partie", "info");
       return;
@@ -106,10 +112,43 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
       showToast("Préparation des musiques...", "info");
       return;
     }
-    startNewGame(selectedCategory);
+    
+    try {
+      setIsStarting(true);
+      
+      const selectedMode = GAME_MODES.find(mode => mode.key === selectedGameMode);
+      const roundsNeeded = selectedMode ? selectedMode.rounds : 10;
+      
+      console.log(`🚀 [Lobby] Préparation d'une partie de ${roundsNeeded} manches...`);
+      
+      // Générer la playlist vérifiée
+      const verifiedPlaylist = await MusicService.generateVerifiedPlaylist(trackPool, roundsNeeded);
+      
+      if (verifiedPlaylist.length < roundsNeeded) {
+        console.warn(`⚠️ [Lobby] Seulement ${verifiedPlaylist.length}/${roundsNeeded} musiques trouvées.`);
+        if (verifiedPlaylist.length === 0) {
+            showToast("Impossible de trouver des musiques jouables.", "error");
+            setIsStarting(false);
+            return;
+        }
+      }
+      
+      // Sauvegarder la playlist dans le document de jeu
+      setGamePlaylist(verifiedPlaylist);
+      
+      // Lancer la partie
+      startNewGame(selectedCategory);
+    } catch (error) {
+      console.error("Erreur lors du lancement:", error);
+      showToast("Erreur lors de la préparation de la playlist.", "error");
+      setIsStarting(false);
+    }
   };
 
   const getButtonContent = () => {
+    if (isStarting) {
+        return <><ActivityIndicator color="white" style={{marginRight: 10}} /><Text style={styles.startButtonText}>Lancement...</Text></>;
+    }
     if (!isHost) {
       return <><ActivityIndicator color="white" style={{marginRight: 10}} /><Text style={styles.startButtonText}>En attente de l'hôte...</Text></>;
     }
