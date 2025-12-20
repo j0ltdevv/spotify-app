@@ -37,7 +37,8 @@ export default function GameScreen(props: {
     updatePlayerScore,
     addPlayedTrack,
     playedTracks: contextPlayedTracks,
-    activeGameDocId
+    activeGameDocId,
+    playlist
   } = useGame();
   
   const { firebaseUser } = useAuth();
@@ -153,25 +154,38 @@ export default function GameScreen(props: {
         currentTrackRef.current = null;
 
         try {
+            // STRATÉGIE 1: Utiliser la playlist pré-vérifiée (Plus robuste contre les doublons)
+            if (playlist && playlist.length >= round) {
+                const playlistTrack = playlist[round - 1];
+                console.log(`🎮 [GameScreen] Utilisation de la playlist (Manche ${round}): ${playlistTrack.title}`);
+                // On injecte le roundId pour garantir la synchro entre joueurs
+                const trackWithRound = { ...playlistTrack, roundId: round };
+                setGameTrack(trackWithRound);
+                addPlayedTrack(playlistTrack.id);
+                return;
+            }
+
+            // STRATÉGIE 2: Fallback sur la recherche dynamique
+            console.log("🎮 [GameScreen] Playlist absente, fallback sur recherche dynamique...");
             if (trackPool.length === 0) {
-            showToast("Le pot commun est vide !", "error");
-            await leaveGame();
-            navigation.navigate('Menu');
-            return;
+              showToast("Le pot commun est vide !", "error");
+              await leaveGame();
+              navigation.navigate('Menu');
+              return;
             }
 
             console.log("🎮 [GameScreen] Asking MusicService for a playable track...");
             const playableTrackResult = await MusicService.findPlayableTrack(trackPool, contextPlayedTracks);
 
             if (isActive && playableTrackResult.success && playableTrackResult.track) {
-            console.log(`🎮 [GameScreen] Track found! Setting as GameTrack: ${playableTrackResult.track.title}`);
-            setGameTrack(playableTrackResult.track);
-            addPlayedTrack(playableTrackResult.track.id);
+              console.log(`🎮 [GameScreen] Track found! Setting as GameTrack: ${playableTrackResult.track.title}`);
+              setGameTrack(playableTrackResult.track);
+              addPlayedTrack(playableTrackResult.track.id);
             } else if (isActive) {
-            console.warn("🎮 [GameScreen] No playable track found.");
-            showToast(playableTrackResult.error || "Aucune musique jouable trouvée.", "error");
-            await leaveGame();
-            navigation.navigate('Menu');
+              console.warn("🎮 [GameScreen] No playable track found.");
+              showToast(playableTrackResult.error || "Aucune musique jouable trouvée.", "error");
+              await leaveGame();
+              navigation.navigate('Menu');
             }
         } catch (error) {
             Logger.error("Erreur critique loadRoundData", error);
@@ -184,25 +198,31 @@ export default function GameScreen(props: {
       loadRoundData();
 
       return () => {
-        console.log("🎮 [GameScreen] Cleanup (Unfocus). Stopping sound.");
+        console.log(`🎮 [GameScreen] Cleanup (Unfocus) Round ${round}. Stopping sound for track: ${currentTrackRef.current?.id}`);
         isActive = false;
         if (timerRef.current) clearInterval(timerRef.current);
-        SoundManager.stopSound();
+        // On ne coupe le son que si c'est celui qu'on a lancé dans cette manche
+        if (currentTrackRef.current?.id) {
+            SoundManager.stopSound(currentTrackRef.current.id);
+        }
       };
-    }, [round, isHost, gameStatus, trackPool, contextPlayedTracks])
+    }, [round, isHost, gameStatus, trackPool, contextPlayedTracks, playlist])
   );
 
   useEffect(() => {
     // Only start if we have a valid track, it's new, AND we are actually waiting for it
-    console.log(`🎮 [GameScreen] SharedTrack Effect. Shared: ${sharedTrack?.id}, Current: ${currentTrack?.id}, ScreenStatus: ${screenStatus}`);
+    console.log(`🎮 [GameScreen] SharedTrack Effect. Shared: ${sharedTrack?.title} (R:${sharedTrack?.roundId}), Current: ${currentTrack?.title}, ScreenStatus: ${screenStatus}`);
     
-    if (sharedTrack && sharedTrack.id !== currentTrack?.id && screenStatus === 'PREPARING_ROUND') {
+    // IMPORTANT: On vérifie que le roundId correspond à la manche actuelle pour éviter de rejouer le titre précédent
+    const isCorrectTrackForRound = sharedTrack && Number(sharedTrack.roundId) === Number(round);
+
+    if (isCorrectTrackForRound && sharedTrack?.id !== currentTrack?.id && screenStatus === 'PREPARING_ROUND') {
       console.log("🎮 [GameScreen] ✅ Condition met! Calling startRound.");
       startRound(sharedTrack as GameTrack);
-    } else if (sharedTrack?.id === currentTrack?.id) {
+    } else if (sharedTrack?.id === currentTrack?.id && sharedTrack !== null) {
         console.log("🎮 [GameScreen] ⏳ Skipping startRound: Track ID matches current track.");
     } else {
-        console.log("🎮 [GameScreen] ⏳ Condition NOT met. Waiting...");
+        console.log("🎮 [GameScreen] ⏳ Condition NOT met. Waiting for correct round track...");
     }
 
     // Cleanup timer on unmount or track change to prevent ghost timers
@@ -373,7 +393,7 @@ export default function GameScreen(props: {
         <CircularTimer timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
         
         <View style={styles.voteInstructionContainer}>
-          <Text style={styles.voteInstructionText}>Trouvez celui qui écoute</Text>
+          <Text style={styles.voteInstructionText}>Trouvez qui écoute</Text>
         </View>
 
         <View style={[styles.playersGrid, { gap }]}>

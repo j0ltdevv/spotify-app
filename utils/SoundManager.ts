@@ -75,8 +75,14 @@ const SoundManager = {
 
   /**
    * Stops and unloads the currently playing sound.
+   * @param trackId Optional: only stop if this track is the one playing
    */
-  async stopSound() {
+  async stopSound(trackId?: string) {
+    if (trackId && currentTrackId !== trackId) {
+        console.log(`🔊 [SoundManager] stopSound ignored: track ${trackId} is no longer current.`);
+        return;
+    }
+
     console.log("🔊 [SoundManager] stopSound called.");
     if (!sound) {
         console.log("🔊 [SoundManager] No sound to stop.");
