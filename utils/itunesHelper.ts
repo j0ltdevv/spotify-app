@@ -230,30 +230,30 @@ export const fetchAudioFromItunes = async (
 ): Promise<ItunesResult | null> => {
   try {
     const cleanedTitle = cleanTrackTitle(title);
-    console.log(`   🔎 iTunes: Recherche de "${title}" par ${artist}`);
-    console.log(`   📝 Titre nettoyé: "${cleanedTitle}"`);
+    // console.log(`   🔎 iTunes: Recherche de "${title}" par ${artist}`);
+    // console.log(`   📝 Titre nettoyé: "${cleanedTitle}"`);
     
     // --- TENTATIVE 1 : Titre + Artiste (Le plus précis) ---
     let query = encodeURIComponent(`${cleanedTitle} ${artist}`);
-    console.log(`   🌐 T1: Query = "${cleanedTitle} ${artist}"`);
+    // console.log(`   🌐 T1: Query = "${cleanedTitle} ${artist}"`);
     let response = await fetch(`${API_ENDPOINTS.ITUNES_SEARCH}?term=${query}&media=music&entity=song&limit=5`);
     let data: ITunesSearchResult = await response.json();
     
-    console.log(`   📊 T1: ${data.resultCount} résultats trouvés`);
+    // console.log(`   📊 T1: ${data.resultCount} résultats trouvés`);
     
     if (data.resultCount === 0) {
-      console.log(`   ❌ iTunes: T1 échec pour ${title}. Essai T2 (Artiste seul)...`);
+      // console.log(`   ❌ iTunes: T1 échec pour ${title}. Essai T2 (Artiste seul)...`);
       
       // --- TENTATIVE 2 (Plan B) : Artiste seul ---
       query = encodeURIComponent(artist);
-      console.log(`   🌐 T2: Query = "${artist}"`);
+      // console.log(`   🌐 T2: Query = "${artist}"`);
       response = await fetch(`${API_ENDPOINTS.ITUNES_SEARCH}?term=${query}&media=music&entity=song&limit=5`);
       data = await response.json();
 
-      console.log(`   📊 T2: ${data.resultCount} résultats trouvés`);
+      // console.log(`   📊 T2: ${data.resultCount} résultats trouvés`);
 
       if (data.resultCount === 0) {
-        console.log(`   ❌ iTunes: T2 échec pour ${artist}. Abandon.`);
+        // console.log(`   ❌ iTunes: T2 échec pour ${artist}. Abandon.`);
         return null;
       }
     }
@@ -261,14 +261,14 @@ export const fetchAudioFromItunes = async (
     const normalizedOriginalTitle = normalizeForComparison(cleanedTitle);
     const normalizedOriginalArtist = normalizeForComparison(artist);
 
-    console.log(`   🎯 Analyse de ${data.results.length} résultats iTunes...`);
+    // console.log(`   🎯 Analyse de ${data.results.length} résultats iTunes...`);
 
     // 1. Chercher le meilleur match (90% de correspondance minimum)
     const bestMatch = data.results.find((track: ITunesTrack) => {
-      console.log(`      🔍 Analyse: "${track.trackName}" par ${track.artistName}`);
+      // console.log(`      🔍 Analyse: "${track.trackName}" par ${track.artistName}`);
       
       if (!track.previewUrl) {
-        console.log(`      ❌ Rejeté : Pas de previewUrl`);
+        // console.log(`      ❌ Rejeté : Pas de previewUrl`);
         return false;
       }
       
@@ -279,20 +279,17 @@ export const fetchAudioFromItunes = async (
       const titleMatchRatio = calculateTitleMatchRatio(cleanedTitle, track.trackName);
       const artistMatch = isArtistMatch(artist, track.artistName);
       
-      console.log(`      📊 Match: ${(titleMatchRatio * 100).toFixed(0)}% titre, Artiste: ${artistMatch ? '✅' : '❌'}`);
+      // console.log(`      📊 Match: ${(titleMatchRatio * 100).toFixed(0)}% titre, Artiste: ${artistMatch ? '✅' : '❌'}`);
       
       if (titleMatchRatio >= 0.9 && artistMatch) {
-        console.log(`      🎉 EXCELLENT MATCH (≥90%) !`);
+        // console.log(`      🎉 EXCELLENT MATCH (≥90%) !`);
       }
       
       return titleMatchRatio >= 0.9 && artistMatch;
     });
 
     if (bestMatch) {
-      console.log(`   ✅ ✅ ✅ MATCH PARFAIT TROUVÉ (≥90%) !`);
-      console.log(`      iTunes: "${bestMatch.trackName}" par ${bestMatch.artistName}`);
-      console.log(`      Original: "${title}" par ${artist}`);
-      console.log(`      Preview URL: ${bestMatch.previewUrl}`);
+      // console.log(`   ✅ ✅ ✅ MATCH PARFAIT TROUVÉ (≥90%) !`);
       return {
         audioUrl: bestMatch.previewUrl!,
         title: bestMatch.trackName,
@@ -302,14 +299,14 @@ export const fetchAudioFromItunes = async (
       };
     }
 
-    console.log(`   🔄 Aucun match ≥90%, tentative avec seuil 80%...`);
+    // console.log(`   🔄 Aucun match ≥90%, tentative avec seuil 80%...`);
 
     // 2. Fallback avec seuil à 80%
     const fallbackMatch = data.results.find((track: ITunesTrack) => {
-      console.log(`      🔍 Fallback: "${track.trackName}"`);
+      // console.log(`      🔍 Fallback: "${track.trackName}"`);
       
       if (!track.previewUrl) {
-        console.log(`      ❌ Pas de preview`);
+        // console.log(`      ❌ Pas de preview`);
         return false;
       }
       

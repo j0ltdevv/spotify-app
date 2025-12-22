@@ -177,6 +177,33 @@ class UserService {
   public isPremium(user: SpotifyUser | null): boolean {
     return user?.product === 'premium';
   }
+
+  /**
+   * Met à jour manuellement le profil utilisateur (Firestore + Cache Local)
+   */
+  public async updateUserProfile(firebaseUid: string, updates: Partial<SpotifyUser>): Promise<void> {
+    const userDocRef = doc(db, 'users', firebaseUid);
+    
+    try {
+      const updatedData = {
+        ...updates,
+        lastUpdated: Date.now()
+      };
+
+      // Update Firestore
+      await setDoc(userDocRef, updatedData, { merge: true });
+      console.log('💾 Profil utilisateur mis à jour manuellement sur Firestore.');
+
+      // Update local cache if exists
+      if (this.cachedUser) {
+        this.cachedUser = { ...this.cachedUser, ...updates };
+        this.cacheTimestamp = Date.now();
+      }
+    } catch (error) {
+       console.error("❌ Erreur updateUserProfile:", error);
+       throw error;
+    }
+  }
 }
 
 export default UserService.getInstance();

@@ -53,6 +53,7 @@ export const ANIMATION_CONFIG = {
 
 export const STORAGE_KEYS = {
   SPOTIFY_TOKEN: '@spotify_access_token',      // Legacy
+  SPOTIFY_REFRESH_TOKEN: '@spotify_refresh_token', // 🆕 Fix 403
   SPOTIFY_TOKEN_EXPIRY: '@spotify_token_expiry', // Legacy
   JWT_TOKEN: '@jwt_token',                     // Backend JWT
   GAME_STATE: '@game_state',

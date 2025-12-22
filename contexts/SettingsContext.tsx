@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Haptics from 'expo-haptics';
+import { TRANSLATIONS, Language } from '../constants/translations';
 
 // Clés pour AsyncStorage
 const SETTINGS_STORAGE_KEY = '@track_roulette_settings';
@@ -10,6 +11,7 @@ export interface AppSettings {
   hapticsEnabled: boolean;
   notificationsEnabled: boolean;
   highQualityAudio: boolean;
+  language: Language; // 🌍 Nouveau paramètre
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -17,12 +19,14 @@ const DEFAULT_SETTINGS: AppSettings = {
   hapticsEnabled: true,
   notificationsEnabled: true,
   highQualityAudio: false,
+  language: 'fr', // Par défaut en Français
 };
 
 type SettingsContextType = {
   settings: AppSettings;
-  updateSetting: (key: keyof AppSettings, value: boolean) => Promise<void>;
+  updateSetting: (key: keyof AppSettings, value: boolean | Language) => Promise<void>; // Value peut être string maintenant
   resetSettings: () => Promise<void>;
+  t: (key: keyof typeof TRANSLATIONS['fr']) => string; // Helper de traduction
 };
 
 const SettingsContext = createContext<SettingsContextType | undefined>(undefined);
@@ -49,13 +53,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
-  const updateSetting = async (key: keyof AppSettings, value: boolean) => {
+  const updateSetting = async (key: keyof AppSettings, value: boolean | Language) => {
     try {
-      // Feedback haptique immédiat si activé
-      if (key !== 'hapticsEnabled' && settings.hapticsEnabled) {
+      // Feedback haptique immédiat si activé (seulement pour les booléens)
+      if (typeof value === 'boolean' && key !== 'hapticsEnabled' && settings.hapticsEnabled) {
         Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      } else if (key === 'hapticsEnabled' && value) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
 
       const newSettings = { ...settings, [key]: value };
@@ -79,8 +81,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     }
   };
 
+  // 🌍 Fonction de traduction
+  const t = (key: keyof typeof TRANSLATIONS['fr']) => {
+    const lang = settings.language || 'fr';
+    return TRANSLATIONS[lang][key] || key;
+  };
+
   return (
-    <SettingsContext.Provider value={{ settings, updateSetting, resetSettings }}>
+    <SettingsContext.Provider value={{ settings, updateSetting, resetSettings, t }}>
       {children}
     </SettingsContext.Provider>
   );

@@ -1,38 +1,38 @@
 import React, { useState } from 'react';
-import { View, Text, Modal, StyleSheet, TouchableOpacity, TextInput, Image, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, Image, Modal, TextInput, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
+import { useSettings } from '../contexts/SettingsContext';
 import { COLORS } from '../constants';
 import GlassCard from './GlassCard';
 import PressableCard from './PressableCard';
 
-type ProfileModalProps = {
+interface ProfileModalProps {
   visible: boolean;
   onClose: () => void;
   currentUsername: string;
   currentPhotoURL: string | null;
   onSave: (username: string, photoURL: string | null) => Promise<void>;
-};
+}
 
 export default function ProfileModal({ visible, onClose, currentUsername, currentPhotoURL, onSave }: ProfileModalProps) {
   const [username, setUsername] = useState(currentUsername);
   const [photoURL, setPhotoURL] = useState<string | null>(currentPhotoURL);
   const [isLoading, setIsLoading] = useState(false);
+  const { t } = useSettings(); // 🌍 Use translation hook
 
   const handleTakePhoto = async () => {
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
-      // Demander la permission
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission requise', 'Nous avons besoin de votre autorisation pour accéder à la caméra.');
+        Alert.alert(t('permission_required'), t('camera_permission_msg')); // ✅ Translated
         return;
       }
 
-      // Ouvrir la caméra
       const result = await ImagePicker.launchCameraAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -46,7 +46,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
       }
     } catch (error) {
       console.error('Erreur lors de la prise de photo:', error);
-      Alert.alert('Erreur', 'Impossible de prendre une photo.');
+      Alert.alert(t('error'), t('camera_error')); // ✅ Translated
     }
   };
 
@@ -54,14 +54,12 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
     try {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       
-      // Demander la permission
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission requise', 'Nous avons besoin de votre autorisation pour accéder à la galerie.');
+        Alert.alert(t('permission_required'), t('gallery_permission_msg')); // ✅ Translated
         return;
       }
 
-      // Ouvrir la galerie
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -75,13 +73,13 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
       }
     } catch (error) {
       console.error('Erreur lors de la sélection de photo:', error);
-      Alert.alert('Erreur', 'Impossible de sélectionner une photo.');
+      Alert.alert(t('error'), t('gallery_error')); // ✅ Translated
     }
   };
 
   const handleSave = async () => {
     if (username.trim().length === 0) {
-      Alert.alert('Pseudo requis', 'Veuillez entrer un pseudo.');
+      Alert.alert(t('pseudo_required'), t('pseudo_missing')); // ✅ Translated
       return;
     }
 
@@ -93,7 +91,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
       onClose();
     } catch (error) {
       console.error('Erreur lors de la sauvegarde:', error);
-      Alert.alert('Erreur', 'Impossible de sauvegarder le profil.');
+      Alert.alert(t('error'), t('save_error')); // ✅ Translated
     } finally {
       setIsLoading(false);
     }
@@ -116,7 +114,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
           <GlassCard style={styles.modalContent} intensity={40}>
             {/* Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Mon Profil</Text>
+              <Text style={styles.modalTitle}>{t('my_profile')}</Text> {/* ✅ Translated */}
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
@@ -125,35 +123,38 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
             {/* Photo de profil */}
             <View style={styles.photoSection}>
               <View style={styles.photoContainer}>
-                {photoURL ? (
+                {!!photoURL ? (
                   <Image source={{ uri: photoURL }} style={styles.photoImage} />
                 ) : (
                   <View style={styles.photoPlaceholder}>
                     <Ionicons name="person" size={60} color="#666" />
                   </View>
                 )}
-                {photoURL && (
+                {!!photoURL ? (
                   <TouchableOpacity 
                     style={styles.removePhotoButton}
                     onPress={handleRemovePhoto}
                   >
                     <Ionicons name="close-circle" size={28} color="#FF6B6B" />
                   </TouchableOpacity>
-                )}
+                ) : null}
+                <View style={styles.editBadge}>
+                    <Ionicons name="pencil" size={14} color="white" />
+                </View>
               </View>
               
               <View style={styles.photoButtons}>
                 <PressableCard onPress={handleTakePhoto} style={styles.photoButton}>
                   <View style={styles.photoButtonContent}>
-                    <Ionicons name="camera" size={24} color={COLORS.SPOTIFY_GREEN} />
-                    <Text style={styles.photoButtonText}>Prendre</Text>
+                    <Ionicons name="camera" size={20} color={COLORS.SPOTIFY_GREEN} />
+                    <Text style={styles.photoButtonText}>{t('camera')}</Text> {/* ✅ Translated */}
                   </View>
                 </PressableCard>
                 
                 <PressableCard onPress={handlePickPhoto} style={styles.photoButton}>
                   <View style={styles.photoButtonContent}>
-                    <Ionicons name="images" size={24} color={COLORS.SPOTIFY_GREEN} />
-                    <Text style={styles.photoButtonText}>Galerie</Text>
+                    <Ionicons name="images" size={20} color={COLORS.SPOTIFY_GREEN} />
+                    <Text style={styles.photoButtonText}>{t('gallery')}</Text> {/* ✅ Translated */}
                   </View>
                 </PressableCard>
               </View>
@@ -161,20 +162,39 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
 
             {/* Input pseudo */}
             <View style={styles.usernameSection}>
-              <Text style={styles.label}>Pseudo</Text>
+              <Text style={styles.label}>{t('identity_secret')}</Text> {/* ✅ Translated */}
               <View style={styles.inputContainer}>
-                <Ionicons name="person-outline" size={20} color="#999" style={styles.inputIcon} />
+                <Ionicons name="person-outline" size={20} color={COLORS.SPOTIFY_GREEN} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   value={username}
                   onChangeText={setUsername}
-                  placeholder="Ton pseudo de détective..."
-                  placeholderTextColor="#666"
-                  maxLength={20}
+                  placeholder={t('pseudo_placeholder')} // ✅ Translated
+                  placeholderTextColor="#555"
+                  maxLength={15}
                   autoCapitalize="none"
                 />
-                <Text style={styles.charCount}>{username.length}/20</Text>
+                <Text style={styles.charCount}>{username.length}/15</Text>
               </View>
+            </View>
+
+            {/* Stats (Décoratif pour l'instant) */}
+            <View style={styles.statsRow}>
+                <View style={styles.statCard}>
+                    <Ionicons name="trophy" size={24} color="#FFD700" />
+                    <Text style={styles.statValue}>--</Text>
+                    <Text style={styles.statLabel}>{t('wins')}</Text> {/* ✅ Translated */}
+                </View>
+                <View style={styles.statCard}>
+                    <Ionicons name="flame" size={24} color="#FF6B6B" />
+                    <Text style={styles.statValue}>--</Text>
+                    <Text style={styles.statLabel}>{t('streak')}</Text> {/* ✅ Translated */}
+                </View>
+                <View style={styles.statCard}>
+                    <Ionicons name="musical-notes" size={24} color="#4ECDC4" />
+                    <Text style={styles.statValue}>--</Text>
+                    <Text style={styles.statLabel}>{t('titles')}</Text> {/* ✅ Translated */}
+                </View>
             </View>
 
             {/* Bouton Sauvegarder */}
@@ -187,7 +207,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
               >
                 <Ionicons name="checkmark-circle" size={24} color="white" />
                 <Text style={styles.saveButtonText}>
-                  {isLoading ? 'Enregistrement...' : 'Enregistrer'}
+                  {isLoading ? t('saving') : t('save')} {/* ✅ Translated */}
                 </Text>
               </LinearGradient>
             </PressableCard>
@@ -245,30 +265,45 @@ const styles = StyleSheet.create({
     borderRadius: 60,
     marginBottom: 16,
     position: 'relative',
+    borderWidth: 4,
+    borderColor: 'rgba(29, 185, 84, 0.2)',
   },
   photoImage: {
     width: '100%',
     height: '100%',
     borderRadius: 60,
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: COLORS.SPOTIFY_GREEN,
   },
   photoPlaceholder: {
     width: '100%',
     height: '100%',
     borderRadius: 60,
-    backgroundColor: '#282828',
+    backgroundColor: '#181818',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 3,
-    borderColor: '#444',
+    borderWidth: 2,
+    borderColor: '#333',
   },
   removePhotoButton: {
     position: 'absolute',
-    top: -5,
-    right: -5,
+    top: 0,
+    right: 0,
     backgroundColor: '#121212',
     borderRadius: 14,
+    zIndex: 10,
+  },
+  editBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    backgroundColor: COLORS.SPOTIFY_GREEN,
+    width: 32, height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#181818',
   },
   photoButtons: {
     flexDirection: 'row',
@@ -278,7 +313,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
   },
   photoButtonContent: {
-    backgroundColor: 'rgba(29, 185, 84, 0.1)',
+    backgroundColor: '#181818',
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: 12,
@@ -286,47 +321,75 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: 'rgba(29, 185, 84, 0.3)',
+    borderColor: '#333',
   },
   photoButtonText: {
-    color: COLORS.SPOTIFY_GREEN,
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#CCC',
+    fontSize: 13,
+    fontWeight: '600',
   },
   usernameSection: {
     marginBottom: 24,
   },
   label: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '700',
+    color: COLORS.TEXT_SECONDARY,
+    fontSize: 11,
+    fontWeight: '800',
     marginBottom: 8,
-    letterSpacing: 0.3,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#282828',
-    borderRadius: 12,
-    borderWidth: 2,
+    backgroundColor: '#121212',
+    borderRadius: 16,
+    borderWidth: 1,
     borderColor: '#333',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
+    height: 56,
   },
   inputIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   input: {
     flex: 1,
     color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
-    paddingVertical: 14,
+    fontSize: 18,
+    fontWeight: '700',
+    height: '100%',
   },
   charCount: {
-    color: '#666',
+    color: '#444',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     marginLeft: 8,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 24,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.05)',
+  },
+  statCard: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  statValue: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '900',
+    marginVertical: 4,
+  },
+  statLabel: {
+    color: '#666',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   saveButtonCard: {
     borderRadius: 16,

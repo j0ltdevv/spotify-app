@@ -81,7 +81,7 @@ class MusicService {
    * Réinitialise le service pour une nouvelle partie
    */
   public reset(): void {
-    console.log("🧹 [MusicService] Réinitialisation de l'historique et des préchargements.");
+    // console.log("🧹 [MusicService] Réinitialisation de l'historique et des préchargements.");
     if (this.recentHistory) {
       this.recentHistory.clear();
     } else {
@@ -97,7 +97,7 @@ class MusicService {
     const cached = this.previewCache.get(trackId);
     
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
-      console.log(`   💾 Cache hit ! Source: ${cached.source} (économie de requêtes API)`);
+      // console.log(`   💾 Cache hit ! Source: ${cached.source} (économie de requêtes API)`);
       return cached;
     }
     
@@ -124,7 +124,7 @@ class MusicService {
       timestamp: Date.now(),
       ...metadata
     });
-    console.log(`   💾 Preview mis en cache (${this.previewCache.size} entrées totales)`);
+    // console.log(`   💾 Preview mis en cache (${this.previewCache.size} entrées totales)`);
   }
 
   /**
@@ -135,7 +135,7 @@ class MusicService {
     excludedTrackIds: string[],
     maxAttempts: number = 15
   ): void {
-    console.log(`\n⏩ Préchargement du prochain track en arrière-plan...`);
+    // console.log(`\n⏩ Préchargement du prochain track en arrière-plan...`);
     this.nextTrackPromise = this.findPlayableTrack(tracks, excludedTrackIds, maxAttempts, false, true);
   }
 
@@ -147,7 +147,7 @@ class MusicService {
     excludedTrackIds: string[]
   ): Promise<PlayableTrackResult | null> {
     if (this.nextTrackPromise) {
-      console.log(`\n🚀 Utilisation du track préchargé !`);
+      // console.log(`\n🚀 Utilisation du track préchargé !`);
       const result = await this.nextTrackPromise;
       this.nextTrackPromise = null;
 

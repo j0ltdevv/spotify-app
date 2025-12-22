@@ -1,8 +1,14 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { initializeAuth, getReactNativePersistence, getAuth } from 'firebase/auth';
+import { 
+  initializeAuth, 
+  getReactNativePersistence, 
+  browserLocalPersistence, 
+  getAuth 
+} from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 import ReactNativeAsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import {
   FIREBASE_API_KEY,
   FIREBASE_AUTH_DOMAIN,
@@ -26,12 +32,6 @@ const firebaseConfig = {
   measurementId: FIREBASE_MEASUREMENT_ID
 };
 
-console.log('🔥 Firebase Config Loaded:', {
-  apiKey: firebaseConfig.apiKey ? `${firebaseConfig.apiKey.substring(0, 5)}...` : 'UNDEFINED',
-  projectId: firebaseConfig.projectId,
-  authDomain: firebaseConfig.authDomain
-});
-
 // Initialize Firebase
 if (!firebaseConfig.apiKey) {
   console.error('❌ Firebase Configuration Error: API Key is missing. Check your .env file and restart the bundler with --clear.');
@@ -39,10 +39,34 @@ if (!firebaseConfig.apiKey) {
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 
-// Initialize Auth with persistence
-const auth = initializeAuth(app, {
-  persistence: getReactNativePersistence(ReactNativeAsyncStorage)
-});
+// Initialize Auth with platform-specific persistence
+let auth;
+
+if (Platform.OS === 'web') {
+  // On Web, use standard browser persistence (localStorage/IndexedDB)
+  // getAuth() automatically configures this, or we can use initializeAuth with browserLocalPersistence
+  try {
+    auth = getAuth(app);
+    auth.setPersistence(browserLocalPersistence);
+  } catch (e) {
+    // Fallback if getAuth was already called
+    auth = getAuth(app);
+  }
+} else {
+  // On Mobile (iOS/Android), use AsyncStorage
+  // We must check if auth is already initialized to avoid "Firebase App already initialized" errors in rare reload cases
+  try {
+    auth = initializeAuth(app, {
+      persistence: getReactNativePersistence(ReactNativeAsyncStorage)
+    });
+  } catch (e: any) {
+    if (e.code === 'auth/already-initialized') {
+        auth = getAuth(app);
+    } else {
+        throw e;
+    }
+  }
+}
 
 // Initialize Firestore
 const db = getFirestore(app);
