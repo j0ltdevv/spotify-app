@@ -3,8 +3,9 @@ import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, Alert, 
 import { useAuth } from '../contexts/AuthContext';
 import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { RouteProp, useFocusEffect } from '@react-navigation/native';
+import { RouteProp, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,6 +27,7 @@ export default function GameScreen(props: {
   route: RouteProp<RootStackParamList, 'Game'>;
 }) {
   const { navigation, route } = props;
+  const isScreenFocused = useIsFocused();
   const { 
     isHost, 
     status: gameStatus,
@@ -35,6 +37,7 @@ export default function GameScreen(props: {
     players, 
     leaveGame, 
     updatePlayerScore,
+    registerVote, 
     addPlayedTrack,
     playedTracks: contextPlayedTracks,
     activeGameDocId,
@@ -43,25 +46,27 @@ export default function GameScreen(props: {
   
   const { firebaseUser } = useAuth();
   const { showToast } = useToast();
+  const { t } = useSettings();
 
   const { round = 1, category = 'TOP_RECENT', playerScores: initialScores, maxRounds = GAME_CONFIG.MAX_ROUNDS } = (route.params || {}) as any;
   
   // -- Automatic session cleanup --
   useEffect(() => {
-    if (!activeGameDocId && gameStatus !== 'playing') {
+    if (!activeGameDocId && gameStatus !== 'playing' && gameStatus !== 'revealing') {
       console.log("🎮 [GameScreen] No active game detected. Returning to Menu.");
       navigation.navigate('Menu');
     }
   }, [activeGameDocId, gameStatus]);
 
   const [currentTrack, setCurrentTrack] = useState<GameTrack | null>(null);
-  // Ref to hold the latest track object to avoid closure staleness in setInterval/timeouts
   const currentTrackRef = useRef<GameTrack | null>(null);
 
   const [timeLeft, setTimeLeft] = useState(GAME_CONFIG.INITIAL_TIME);
-  const timeLeftRef = useRef(GAME_CONFIG.INITIAL_TIME); // ✅ Ref for synchronous timer access
+  const timeLeftRef = useRef(GAME_CONFIG.INITIAL_TIME);
 
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
+  const [localScore, setLocalScore] = useState<number>(0); 
+  const [hasVoted, setHasVoted] = useState(false); 
   const [playerScores, setPlayerScores] = useState<PlayerScores>(initialScores || {});
   const [screenStatus, setScreenStatus] = useState< 'PREPARING_ROUND' | 'PLAYING' | 'VOTED'>('PREPARING_ROUND');
   
@@ -74,52 +79,88 @@ export default function GameScreen(props: {
     currentTrackRef.current = currentTrack;
   }, [currentTrack]);
 
-  // --- 🔥 ROBUST TIMER LOGIC ---
-  // This effect is the ONLY master of time. It starts/stops based on screen status.
+  // --- 🔥 SYNCHRONIZED REVEAL LOGIC ---
   useEffect(() => {
-    // 1. Always clear existing timer first (Zombie killer)
+    if (gameStatus === 'revealing') {
+        console.log("🎮 [GameScreen] Status is REVEALING -> Navigating to RevealScreen.");
+        
+        SoundManager.stopSound();
+        if (timerRef.current) clearInterval(timerRef.current);
+
+        const track = currentTrackRef.current;
+        const myPlayerId = firebaseUser?.uid;
+        
+        (navigation.navigate as any)('Reveal', { 
+            correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?',
+            track: track,
+            score: localScore, 
+            round, 
+            playerScores, 
+            previousScores: playerScores, 
+            selectedPlayer: selectedPlayer, 
+            category, 
+            maxRounds 
+        });
+    }
+  }, [gameStatus]);
+
+  // --- 🔥 ROBUST TIMER LOGIC ---
+  useEffect(() => {
     if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
     }
 
-    // 2. Only start if we are strictly in PLAYING mode
-    if (screenStatus === 'PLAYING') {
-        console.log("🎮 [GameScreen] Status is PLAYING -> Starting NEW Timer.");
+    if (screenStatus === 'PLAYING' && isScreenFocused) {
+        console.log("🎮 [GameScreen] Status is PLAYING -> Starting NEW Robust Timer.");
         
-        // Reset values
+        const startTime = Date.now();
+        const duration = GAME_CONFIG.INITIAL_TIME * 1000;
+        const endTime = startTime + duration;
+
         timeLeftRef.current = GAME_CONFIG.INITIAL_TIME;
         setTimeLeft(GAME_CONFIG.INITIAL_TIME);
 
         timerRef.current = setInterval(() => {
-            timeLeftRef.current -= 1;
-            setTimeLeft(timeLeftRef.current); // Update UI
+            // On laisse le timer tourner même en arrière-plan grâce au mode Audio
+            const now = Date.now();
+            const remaining = Math.ceil((endTime - now) / 1000);
+            
+            if (remaining !== timeLeftRef.current) {
+                timeLeftRef.current = remaining;
+                setTimeLeft(Math.max(0, remaining));
+            }
 
-            if (timeLeftRef.current <= 0) {
-                console.log("🎮 [GameScreen] Timer finished naturally.");
+            if (remaining <= 0) {
+                console.log("🎮 [GameScreen] Timer finished naturally (Timestamp check).");
                 if (timerRef.current) clearInterval(timerRef.current);
                 handleTimeOut();
             }
-        }, 1000);
+        }, 500); 
     } else {
-        console.log(`🎮 [GameScreen] Status is ${screenStatus} -> Timer stopped.`);
-    }
-
-    // 3. Cleanup on unmount or status change
-    return () => {
         if (timerRef.current) {
             clearInterval(timerRef.current);
             timerRef.current = null;
         }
+    }
+
+    return () => {
+        if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [screenStatus]); // Only re-run when status changes
+  }, [screenStatus, isScreenFocused]);
 
   // --- Core Game Flow ---
 
   useFocusEffect(
     React.useCallback(() => {
       console.log(`🎮 [GameScreen] Focus Effect triggered. Round: ${round}, Status: ${gameStatus}`);
-      if (gameStatus !== 'playing') return;
+      if (timerRef.current) clearInterval(timerRef.current);
+      
+      if (gameStatus !== 'playing') {
+          console.log("🎮 [GameScreen] 🛑 Status mismatch (not playing). Aborting logic.");
+          return;
+      }
+      
       if (round > maxRounds) {
         const results = players.map(p => ({
           name: p.name,
@@ -134,6 +175,7 @@ export default function GameScreen(props: {
         navigation.replace('GameOver', { results });
         return;
       }
+
       if (roundLock.current === round) {
           console.log("🎮 [GameScreen] Round locked (already loaded), skipping loadRoundData.");
           return;
@@ -141,34 +183,42 @@ export default function GameScreen(props: {
 
       let isActive = true;
       const loadRoundData = async () => {
-        console.log("🎮 [GameScreen] loadRoundData started...");
         if (!isHost || !isActive) return;
+        if (gameStatus !== 'playing') {
+            console.warn("🎮 [GameScreen] ⚠️ loadRoundData aborted: GameStatus changed to", gameStatus);
+            return;
+        }
         
+        console.log("🎮 [GameScreen] loadRoundData started...");
         roundLock.current = round;
+        
         setScreenStatus('PREPARING_ROUND');
         setSelectedPlayer(null);
+        setHasVoted(false);
+        setLocalScore(0);
+        timeLeftRef.current = GAME_CONFIG.INITIAL_TIME;
         setTimeLeft(GAME_CONFIG.INITIAL_TIME);
         
-        // IMPORTANT: Reset shared track AND REF to avoid stale data triggering startRound early
         setGameTrack(null);
         currentTrackRef.current = null;
 
         try {
-            // STRATÉGIE 1: Utiliser la playlist pré-vérifiée (Plus robuste contre les doublons)
             if (playlist && playlist.length >= round) {
                 const playlistTrack = playlist[round - 1];
-                console.log(`🎮 [GameScreen] Utilisation de la playlist (Manche ${round}): ${playlistTrack.title}`);
-                // On injecte le roundId pour garantir la synchro entre joueurs
-                const trackWithRound = { ...playlistTrack, roundId: round };
-                setGameTrack(trackWithRound);
-                addPlayedTrack(playlistTrack.id);
+                if (playlistTrack) {
+                    console.log(`🎮 [GameScreen] Playlist Track: ${playlistTrack.title}`);
+                    const trackWithRound = { ...playlistTrack, roundId: round };
+                    setGameTrack(trackWithRound);
+                    addPlayedTrack(playlistTrack.id);
+                } else {
+                    console.error("🎮 [GameScreen] Playlist index error.");
+                }
                 return;
             }
 
-            // STRATÉGIE 2: Fallback sur la recherche dynamique
             console.log("🎮 [GameScreen] Playlist absente, fallback sur recherche dynamique...");
             if (trackPool.length === 0) {
-              showToast("Le pot commun est vide !", "error");
+              showToast(t('pool_empty'), "error");
               await leaveGame();
               navigation.navigate('Menu');
               return;
@@ -178,30 +228,31 @@ export default function GameScreen(props: {
             const playableTrackResult = await MusicService.findPlayableTrack(trackPool, contextPlayedTracks);
 
             if (isActive && playableTrackResult.success && playableTrackResult.track) {
-              console.log(`🎮 [GameScreen] Track found! Setting as GameTrack: ${playableTrackResult.track.title}`);
               setGameTrack(playableTrackResult.track);
               addPlayedTrack(playableTrackResult.track.id);
             } else if (isActive) {
               console.warn("🎮 [GameScreen] No playable track found.");
-              showToast(playableTrackResult.error || "Aucune musique jouable trouvée.", "error");
+              showToast(playableTrackResult.error || t('no_playable_track'), "error");
               await leaveGame();
               navigation.navigate('Menu');
             }
         } catch (error) {
             Logger.error("Erreur critique loadRoundData", error);
-            showToast("Erreur lors de la préparation de la manche.", "error");
+            showToast(t('round_prep_error'), "error");
             await leaveGame();
             navigation.navigate('Menu');
         }
       };
 
-      loadRoundData();
+      const timeoutId = setTimeout(() => {
+          loadRoundData();
+      }, 100);
 
       return () => {
-        console.log(`🎮 [GameScreen] Cleanup (Unfocus) Round ${round}. Stopping sound for track: ${currentTrackRef.current?.id}`);
+        console.log("🎮 [GameScreen] Cleaning up Effect (Unfocus/Unmount)");
         isActive = false;
+        clearTimeout(timeoutId);
         if (timerRef.current) clearInterval(timerRef.current);
-        // On ne coupe le son que si c'est celui qu'on a lancé dans cette manche
         if (currentTrackRef.current?.id) {
             SoundManager.stopSound(currentTrackRef.current.id);
         }
@@ -210,53 +261,44 @@ export default function GameScreen(props: {
   );
 
   useEffect(() => {
-    // Only start if we have a valid track, it's new, AND we are actually waiting for it
-    console.log(`🎮 [GameScreen] SharedTrack Effect. Shared: ${sharedTrack?.title} (R:${sharedTrack?.roundId}), Current: ${currentTrack?.title}, ScreenStatus: ${screenStatus}`);
-    
-    // IMPORTANT: On vérifie que le roundId correspond à la manche actuelle pour éviter de rejouer le titre précédent
     const isCorrectTrackForRound = sharedTrack && Number(sharedTrack.roundId) === Number(round);
 
-    if (isCorrectTrackForRound && sharedTrack?.id !== currentTrack?.id && screenStatus === 'PREPARING_ROUND') {
+    if (isCorrectTrackForRound && sharedTrack?.id !== currentTrack?.id && screenStatus === 'PREPARING_ROUND' && isScreenFocused) {
       console.log("🎮 [GameScreen] ✅ Condition met! Calling startRound.");
       startRound(sharedTrack as GameTrack);
-    } else if (sharedTrack?.id === currentTrack?.id && sharedTrack !== null) {
-        console.log("🎮 [GameScreen] ⏳ Skipping startRound: Track ID matches current track.");
-    } else {
-        console.log("🎮 [GameScreen] ⏳ Condition NOT met. Waiting for correct round track...");
     }
-
-    // Cleanup timer on unmount or track change to prevent ghost timers
-    return () => {
-        if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [sharedTrack, screenStatus]);
-
-  // --- Core Game Flow ---
+  }, [sharedTrack, screenStatus, isScreenFocused]);
 
   const startRound = async (track: GameTrack) => {
+    if (gameStatus !== 'playing') {
+        console.warn("🎮 [GameScreen] startRound blocked: GameStatus is not playing.");
+        return;
+    }
+
     console.log(`🎮 [GameScreen] startRound triggered for track: ${track.title} (ID: ${track.id})`);
     
-    // Immediate ref update for safety
     currentTrackRef.current = track;
     setCurrentTrack(track);
+
+    timeLeftRef.current = GAME_CONFIG.INITIAL_TIME;
+    setTimeLeft(GAME_CONFIG.INITIAL_TIME);
 
     try {
       if (track.preview_url) {
         console.log("🎮 [GameScreen] Requesting SoundManager to play...");
-        // Explicitly stop previous sound to be safe
         await SoundManager.stopSound();
         await SoundManager.playSound(track.preview_url, track.id);
       } else {
         console.warn("🎮 [GameScreen] No preview URL for this track.");
-        showToast("Aucun extrait audio pour ce titre.", "info");
+        showToast(t('no_preview'), "info");
       }
       
-      // ✅ This state change triggers the Timer useEffect above
       setScreenStatus('PLAYING'); 
+      setHasVoted(false); 
 
     } catch (error) {
       Logger.error("Erreur en démarrant le son", { error, track });
-      showToast("Cet extrait n'a pas pu être chargé.", "error");
+      showToast(t('track_load_error'), "error");
       if (isHost) {
         roundLock.current = 0;
         navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
@@ -266,69 +308,84 @@ export default function GameScreen(props: {
 
   const handleVoteAction = async (playerId: string) => {
     console.log(`🎮 [GameScreen] Vote action for player: ${playerId}`);
-    if (screenStatus !== 'PLAYING') return;
+    if (screenStatus !== 'PLAYING' || hasVoted) return;
     
     setScreenStatus('VOTED');
+    setHasVoted(true); 
     setSelectedPlayer(playerId);
+    
+    if (timerRef.current) clearInterval(timerRef.current);
     await SoundManager.stopSound();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
     
-    // Use REF here too just in case
     const track = currentTrackRef.current;
     
     const isCorrect = track?.correctPlayer === playerId;
     const score = isCorrect ? 500 + (timeLeft * 30) : 0;
     const myPlayerId = firebaseUser?.uid;
-    const newScores = { ...playerScores };
     
-    if (myPlayerId && score > 0) {
-      newScores[myPlayerId] = (newScores[myPlayerId] || 0) + score;
-      if (updatePlayerScore) updatePlayerScore(myPlayerId, score);
+    setLocalScore(score); 
+
+    if (myPlayerId) {
+      if (score > 0) {
+        setPlayerScores(prev => ({
+            ...prev,
+            [myPlayerId]: (prev[myPlayerId] || 0) + score
+        }));
+        if (updatePlayerScore) updatePlayerScore(myPlayerId, score);
+      }
+      registerVote(myPlayerId);
     }
 
-    (navigation.navigate as any)('Reveal', { 
+    navigation.replace('Reveal', { 
         correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?',
-        track: track, // Pass null/track explicitly
+        track: track,
         score, round, 
         playerScores: newScores, 
-        previousScores: playerScores, // Add this
+        previousScores: playerScores,
         selectedPlayer: playerId, category, maxRounds 
     });
   };
 
   const handleTimeOut = async () => {
-    console.log("🎮 [GameScreen] handleTimeOut called.");
-    
-    // Use REF to get the latest track value, bypassing closure staleness
-    const track = currentTrackRef.current;
-    console.log(`🎮 [GameScreen] handleTimeOut using track: ${track?.title || 'NULL'}`);
-
-    if (!track) {
-        console.warn("⚠️ handleTimeOut blocked: No track available in ref. Ghost timer?");
+    if (screenStatus !== 'PLAYING' || !isScreenFocused) {
+        console.warn(`⚠️ [GameScreen] handleTimeOut ignoré. Status: ${screenStatus}, Focused: ${isScreenFocused}`);
         return;
     }
 
-    await SoundManager.stopSound();
+    console.log("🎮 [GameScreen] handleTimeOut called.");
+    
+    if (timerRef.current) clearInterval(timerRef.current);
     setScreenStatus('VOTED');
+    setHasVoted(true);
+    setLocalScore(0);
+    
+    const track = currentTrackRef.current;
+    await SoundManager.stopSound();
 
-    (navigation.navigate as any)('Reveal', { 
+    const myPlayerId = firebaseUser?.uid;
+    if (myPlayerId) {
+        registerVote(myPlayerId);
+    }
+
+    navigation.replace('Reveal', { 
         correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?', 
-        track: track, // Pass the ref value
+        track: track,
         score: 0, round, 
         playerScores, 
-        previousScores: playerScores, // Add this
+        previousScores: playerScores,
         selectedPlayer: undefined, category, maxRounds 
     });
   };
 
   const handleQuit = () => {
     Alert.alert(
-      "Quitter la partie",
-      "Es-tu sûr de vouloir quitter ? Ta progression sera perdue.",
+      t('quit_title'),
+      t('quit_game_confirm'),
       [
-        { text: "Annuler", style: "cancel" },
+        { text: t('cancel'), style: "cancel" },
         { 
-          text: "Quitter", 
+          text: t('quit'), 
           style: "destructive", 
           onPress: async () => {
             await SoundManager.stopSound();
@@ -345,9 +402,9 @@ export default function GameScreen(props: {
     return (
       <SafeContainer>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingTitle}>MANCHE {round}</Text>
+          <Text style={styles.loadingTitle}>{t('round_label')} {round}</Text>
           <ActivityIndicator size="large" color={COLORS.SPOTIFY_GREEN} />
-          <Text style={styles.loadingText}>Préparation de la musique...</Text>
+          <Text style={styles.loadingText}>{t('preparing_music')}</Text>
         </View>
       </SafeContainer>
     );
@@ -387,33 +444,29 @@ export default function GameScreen(props: {
           <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
             <Ionicons name="close" size={24} color="#FF6B6B" />
           </TouchableOpacity>
-          <Text style={styles.roundIndicator}>MANCHE {round} / {maxRounds}</Text>
+          <Text style={styles.roundIndicator}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
           <View style={{ width: 40 }} /> 
         </View>
-        <CircularTimer timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
+        {/* Ajout de la clé 'round' pour forcer le remontage et relancer l'animation fluide à chaque manche */}
+        <CircularTimer key={round} timeLeft={timeLeft} maxTime={GAME_CONFIG.INITIAL_TIME} />
         
         <View style={styles.voteInstructionContainer}>
-          <Text style={styles.voteInstructionText}>Trouvez qui écoute</Text>
+          <Text style={styles.voteInstructionText}>{t('find_listener')}</Text>
         </View>
 
         <View style={[styles.playersGrid, { gap }]}>
           {players.map(p => (
             <PressableCard key={p.id} style={{ width: cardWidth as any }} onPress={() => handleVoteAction(p.id)}>
               <GlassCard style={[styles.playerVote, selectedPlayer === p.id && styles.playerVoteSelected]}>
-                  {p.image ? (
+                  {!!p.image ? (
                     <Image source={{ uri: p.image }} style={{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }} />
                   ) : (
-                    <View style={[
-                      { width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }, 
-                      { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }
-                    ]}>
+                    <View style={[{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }, { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
                         <Text style={{ fontSize: avatarSize * 0.4 }}>{p.emoji || '👤'}</Text>
                     </View>
                   )}
                   <Text style={[styles.playerVoteName, { fontSize: nameSize }]} numberOfLines={1}>{p.name}</Text>
-                  {selectedPlayer === p.id && (
-                    <View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={avatarSize * 0.18} color="#fff" /></View>
-                  )}
+                  {selectedPlayer === p.id ? (<View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={avatarSize * 0.18} color="#fff" /></View>) : null}
               </GlassCard>
             </PressableCard>
           ))}

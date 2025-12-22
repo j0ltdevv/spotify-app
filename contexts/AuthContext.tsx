@@ -6,16 +6,17 @@ import { onAuthStateChanged, User, signInAnonymously, signOut, updateProfile, de
 import { doc, deleteDoc } from 'firebase/firestore';
 import { app, auth, db } from '../services/FirebaseService'; 
 import UserService from '../services/UserService'; 
+import { SPOTIFY_CONFIG } from '../config'; // Needed for clientId in refresh call
 
 // 1. Définition des types pour le contexte
 interface AuthContextType {
   accessToken: string | null;
-  setAccessToken: (token: string | null) => void;
+  setAccessToken: (token: string | null, refreshToken?: string | null) => void;
   isLoading: boolean;
   tokenExpiry: number | null;
   checkTokenValidity: () => Promise<boolean>;
   logout: () => Promise<void>;
-  deleteAccount: () => Promise<void>; // New function
+  deleteAccount: () => Promise<void>; 
   firebaseUser: User | null; 
   loginWithSpotifyFirebase: (accessToken: string) => Promise<void>; 
 }
@@ -26,6 +27,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 // 3. Fournisseur du contexte (le wrapper)
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState<string | null>(null); // Local state for refresh token
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [tokenExpiry, setTokenExpiry] = useState<number | null>(null);
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null); 
@@ -71,27 +73,74 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Check token validity periodically (every 5 minutes)
   useEffect(() => {
     if (accessToken && tokenExpiry) {
-      const interval = setInterval(() => {
+      const interval = setInterval(async () => {
+        // If expired or about to expire, try to refresh
         if (isTokenExpired(tokenExpiry)) {
-          console.log('⚠️ Token expiré détecté, déconnexion automatique');
-          logout();
+          console.log('⚠️ Token expiré détecté par interval, tentative de refresh...');
+          const success = await refreshSpotifyToken();
+          if (!success) {
+            console.log('❌ Refresh échoué, déconnexion automatique');
+            logout();
+          }
         }
       }, 5 * 60 * 1000); // Check every 5 minutes
 
       return () => clearInterval(interval);
     }
-  }, [accessToken, tokenExpiry]); 
+  }, [accessToken, tokenExpiry, refreshToken]); 
+
+  // --- NEW: Refresh Token Logic ---
+  const refreshSpotifyToken = async (): Promise<boolean> => {
+    console.log("🔄 Tentative de rafraîchissement du token Spotify...");
+    const currentRefreshToken = refreshToken || await AsyncStorage.getItem(STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN);
+
+    if (!currentRefreshToken) {
+        console.warn("⚠️ Pas de refresh token disponible.");
+        return false;
+    }
+
+    try {
+        const response = await fetch('https://accounts.spotify.com/api/token', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                refresh_token: currentRefreshToken,
+                client_id: SPOTIFY_CONFIG.CLIENT_ID,
+            }).toString(),
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.access_token) {
+            console.log("✅ Token rafraîchi avec succès !");
+            await setToken(data.access_token, data.refresh_token || null); // Sometimes we get a new refresh token
+            return true;
+        } else {
+            console.error("❌ Erreur réponse API refresh:", data);
+            return false;
+        }
+    } catch (error) {
+        console.error("❌ Erreur réseau refresh:", error);
+        return false;
+    }
+  };
 
   const loadToken = async () => {
     try {
       console.log('🔑 Chargement du token sauvegardé...');
       const savedToken = await AsyncStorage.getItem(STORAGE_KEYS.SPOTIFY_TOKEN);
       const savedExpiry = await AsyncStorage.getItem(STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY);
+      const savedRefreshToken = await AsyncStorage.getItem(STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN);
+
+      if (savedRefreshToken) setRefreshToken(savedRefreshToken);
 
       if (savedToken && savedExpiry) {
         const expiryTime = parseInt(savedExpiry, 10);
 
-        // Check if the token has not expired
+        // 1. Check if the token has NOT expired
         if (!isTokenExpired(expiryTime)) {
           // Double check with Spotify API
           const isValid = await validateToken(savedToken);
@@ -101,20 +150,28 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setAccessToken(savedToken);
             setTokenExpiry(expiryTime);
           } else {
-            console.log('⚠️ Token invalide côté API, nettoyage...');
-            await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY]);
+            console.log('⚠️ Token invalide côté API, tentative de refresh...');
+            // Try refresh if API says invalid (revoked?)
+            const refreshSuccess = await refreshSpotifyToken();
+            if (!refreshSuccess) {
+                await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
+            }
           }
         } else {
-          console.log('⚠️ Token expiré, nettoyage...');
-          await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY]);
+          console.log('⚠️ Token expiré, tentative de refresh...');
+          // 2. Token expired -> Try Refresh
+          const refreshSuccess = await refreshSpotifyToken();
+          if (!refreshSuccess) {
+             console.log('❌ Impossible de rafraîchir, nettoyage...');
+             await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
+          }
         }
       } else {
         console.log('ℹ️ Aucun token sauvegardé');
       }
     } catch (error) {
       console.error('❌ Erreur lors du chargement du token:', error);
-      // In case of error, clear the token
-      await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY]);
+      await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
     } finally {
       // setIsLoading(false); // Auth state listener will handle isLoading
     }
@@ -126,11 +183,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.SPOTIFY_TOKEN, 
         STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY,
+        STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN, // Clean refresh token
         STORAGE_KEYS.GAME_STATE
       ]);
       await signOut(auth); // Sign out from Firebase
       setAccessToken(null);
       setTokenExpiry(null);
+      setRefreshToken(null);
       setFirebaseUser(null);
       console.log('✅ Déconnexion réussie');
     } catch (error) {
@@ -139,7 +198,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   // Save the token
-  const setToken = useCallback(async (token: string | null) => {
+  const setToken = useCallback(async (token: string | null, newRefreshToken?: string | null) => {
     setAccessToken(token);
     
     try {
@@ -149,6 +208,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setTokenExpiry(expiryTime);
         await AsyncStorage.setItem(STORAGE_KEYS.SPOTIFY_TOKEN, token);
         await AsyncStorage.setItem(STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, expiryTime.toString());
+        
+        if (newRefreshToken) {
+             setRefreshToken(newRefreshToken);
+             await AsyncStorage.setItem(STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN, newRefreshToken);
+             console.log("💾 Refresh Token sauvegardé.");
+        }
+        
         console.log('✅ Token sauvegardé avec succès');
         console.log(`⏰ Expiration prévue: ${new Date(expiryTime).toLocaleString()}`);
       } else {
@@ -198,21 +264,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     // Check local expiry
     if (isTokenExpired(tokenExpiry)) {
-      console.log('⚠️ Token expiré localement');
-      await logout();
-      return false;
+      console.log('⚠️ Token expiré localement, tentative de refresh...');
+      return await refreshSpotifyToken();
     }
 
     // Check with API
     const isValid = await validateToken(accessToken);
     if (!isValid) {
-      console.log('⚠️ Token invalide côté API');
-      await logout();
-      return false;
+      console.log('⚠️ Token invalide côté API, tentative de refresh...');
+      return await refreshSpotifyToken();
     }
 
     return true;
-  }, [accessToken, tokenExpiry, logout]);
+  }, [accessToken, tokenExpiry, logout, refreshToken]); // Added dependencies
 
   // Delete Account
   const deleteAccount = useCallback(async () => {
@@ -243,6 +307,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       await AsyncStorage.multiRemove([
         STORAGE_KEYS.SPOTIFY_TOKEN, 
         STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY,
+        STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN,
         STORAGE_KEYS.GAME_STATE
       ]);
 
@@ -252,6 +317,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       setAccessToken(null);
       setTokenExpiry(null);
+      setRefreshToken(null);
       setFirebaseUser(null);
       
     } catch (error) {

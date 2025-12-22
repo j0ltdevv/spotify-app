@@ -12,45 +12,41 @@ interface CircularTimerProps {
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export default function CircularTimer({ timeLeft, maxTime, size = 180 }: CircularTimerProps) {
-  const progress = useRef(new Animated.Value(1)).current;
+  // Initialiser à 1 (100%) si c'est le début, sinon calculer le ratio actuel pour reprendre l'anim
+  const initialProgress = useRef(timeLeft / maxTime).current; 
+  const progress = useRef(new Animated.Value(initialProgress)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   
   const radius = (size - 20) / 2;
   const circumference = 2 * Math.PI * radius;
   
   useEffect(() => {
-    // Animation de la progression circulaire
+    // Lancer une animation fluide et continue vers 0
     Animated.timing(progress, {
-      toValue: timeLeft / maxTime,
-      duration: 1000,
-      useNativeDriver: true,
+      toValue: 0,
+      duration: timeLeft * 1000, // Durée restante exacte en ms
+      useNativeDriver: true, // Optimisation native (60 FPS)
+      isInteraction: false,
     }).start();
-    
-    // Animation d'urgence quand < 10 secondes
-    if (timeLeft <= 10 && timeLeft > 0) {
+  }, []); // Ne se lance qu'au montage du composant (ou reset si la clé change)
+  
+  // Animation de pulsation quand il reste peu de temps
+  useEffect(() => {
+    if (timeLeft <= 5 && timeLeft > 0) {
       Animated.sequence([
-        Animated.timing(scaleAnim, {
-          toValue: 1.1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(scaleAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
+        Animated.timing(scaleAnim, { toValue: 1.1, duration: 200, useNativeDriver: true }),
+        Animated.timing(scaleAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
       ]).start();
     }
   }, [timeLeft]);
   
-  // Couleur qui évolue progressivement selon le temps restant
+  // Couleur fixe basée sur le texte (plus lisible que l'interpolation complexe pour l'instant)
   const getTimerColor = () => {
     const ratio = timeLeft / maxTime;
-    if (ratio > 0.66) return COLORS.SUCCESS_GREEN;  // Vert : 67%-100%
-    if (ratio > 0.5) return '#90EE90';              // Vert clair : 51%-66%
-    if (ratio > 0.4) return '#FFD700';              // Jaune : 41%-50%
-    if (ratio > 0.26) return COLORS.WARNING_ORANGE; // Orange : 27%-40%
-    return COLORS.ERROR_RED;                        // Rouge : 0%-26%
+    if (ratio > 0.66) return COLORS.SUCCESS_GREEN;
+    if (ratio > 0.4) return COLORS.GOLD;
+    if (ratio > 0.2) return COLORS.WARNING_ORANGE;
+    return COLORS.ERROR_RED;
   };
   
   const strokeDashoffset = progress.interpolate({
@@ -76,7 +72,7 @@ export default function CircularTimer({ timeLeft, maxTime, size = 180 }: Circula
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke={getTimerColor()}
+          stroke={getTimerColor()} 
           strokeWidth={10}
           fill="none"
           strokeDasharray={circumference}
@@ -90,14 +86,9 @@ export default function CircularTimer({ timeLeft, maxTime, size = 180 }: Circula
       {/* Texte du timer au centre */}
       <View style={styles.timerTextContainer}>
         <Text style={[styles.timerText, { color: getTimerColor() }]}>
-          {timeLeft}
+          {Math.ceil(timeLeft)}
         </Text>
       </View>
-      
-      {/* Effet de lueur */}
-      {timeLeft <= 10 && (
-        <View style={[styles.glow, { backgroundColor: getTimerColor() }]} />
-      )}
     </Animated.View>
   );
 }

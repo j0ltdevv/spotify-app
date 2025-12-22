@@ -2,6 +2,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
+import { useSettings } from '../contexts/SettingsContext';
 import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
@@ -29,19 +30,20 @@ type RevealScreenProps = {
 const { width } = Dimensions.get('window');
 
 export default function RevealScreen({ navigation, route }: RevealScreenProps) {
-  const { 
-    correctPlayer, track, score = 0, round, 
-    playerScores = {}, previousScores = {}, 
-    selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS 
+  const {
+    correctPlayer, track, score = 0, round,
+    playerScores = {}, previousScores = {},
+    selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS
   } = route.params;
   const { firebaseUser } = useAuth();
   const { players, leaveGame, isHost, activeGameDocId } = useGame();
   const { showToast } = useToast();
+  const { t } = useSettings();
 
-  const safeTrack: GameTrack = track || { id: '', title: 'Titre inconnu', artist: 'Artiste inconnu', album: 'Album inconnu', albumImage: '', preview_url: '', correctPlayer: '?' };
-  
+  const safeTrack: GameTrack = track || { id: '', title: t('unknown_title'), artist: t('unknown_artist'), album: t('unknown_album'), albumImage: '', preview_url: '', correctPlayer: '?' };       
+
   const myId = firebaseUser?.uid;
-  const isGuessCorrect = myId ? score > 0 : false; // Only the player who voted gets a score
+  const isGuessCorrect = myId ? score > 0 : false; 
   const voter = players.find(p => p.id === myId);
   const correctPlayerObj = players.find(p => p.id === safeTrack.correctPlayer);
 
@@ -55,27 +57,23 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     bannerY: new Animated.Value(-100),
   });
   const [showConfetti, setShowConfetti] = useState(isGuessCorrect);
-  const [autoNextTime, setAutoNextTime] = useState(8); 
+  const [autoNextTime, setAutoNextTime] = useState(8);
   const [bannerVisible, setBannerVisible] = useState(true);
   const bannerTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // PanResponder pour le glissement manuel
   const panResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: () => true,
       onPanResponderMove: (_, gestureState) => {
-        // Autoriser seulement le glissement vers le haut
         if (gestureState.dy < 0) {
           anims.bannerY.setValue(gestureState.dy);
         }
       },
       onPanResponderRelease: (_, gestureState) => {
         if (gestureState.dy < -30) {
-          // Swipe vers le haut détecté
           dismissBanner();
         } else {
-          // Rebondir si pas assez glissé
           Animated.spring(anims.bannerY, { toValue: 0, tension: 50, friction: 8, useNativeDriver: true }).start();
         }
       },
@@ -92,13 +90,13 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
   const handleQuit = () => {
     Alert.alert(
-      "Quitter la partie",
-      "Es-tu sûr de vouloir quitter ?",
+      t('quit_title'),
+      t('quit_game_confirm'),
       [
-        { text: "Annuler", style: "cancel" },
-        { 
-          text: "Quitter", 
-          style: "destructive", 
+        { text: t('cancel'), style: "cancel" },
+        {
+          text: t('quit'),
+          style: "destructive",
           onPress: async () => {
             if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
             if (countdownInterval.current) clearInterval(countdownInterval.current);
@@ -106,7 +104,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
             await SoundManager.stopSound();
             await leaveGame();
             navigation.navigate('Menu');
-          } 
+          }
         }
       ]
     );
@@ -123,8 +121,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
     }
-    
-    // Animate everything in
+
     Animated.sequence([
       Animated.timing(anims.bgFade, { toValue: 1, duration: 400, useNativeDriver: true }),
       Animated.parallel([
@@ -135,18 +132,15 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       Animated.timing(anims.buttonFade, { toValue: 1, duration: 500, useNativeDriver: true }),
     ]).start();
 
-    // Apparition de la bannière
     Animated.parallel([
       Animated.timing(anims.bannerFade, { toValue: 1, duration: 400, useNativeDriver: true }),
       Animated.spring(anims.bannerY, { toValue: 0, tension: 50, friction: 8, useNativeDriver: true }),
     ]).start();
 
-    // Disparition automatique après 3 secondes
     bannerTimerRef.current = setTimeout(() => {
       dismissBanner();
     }, 3000);
 
-    // Gestion du compte à rebours pour la transition automatique
     countdownInterval.current = setInterval(() => {
       setAutoNextTime(prev => {
         if (prev <= 1) {
@@ -157,7 +151,6 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       });
     }, 1000);
 
-    // Transition automatique après 8 secondes
     nextRoundTimer.current = setTimeout(() => {
       handleNext();
     }, 8000);
@@ -170,26 +163,23 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
   }, []);
 
   const handleNext = async () => {
-    // Nettoyer les timers si clic manuel
     if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
     if (countdownInterval.current) clearInterval(countdownInterval.current);
 
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
+
     if (round >= maxRounds) {
-        // Si hôte, marquer la partie comme terminée dans Firestore pour éviter les relances auto
         if (isHost && activeGameDocId) {
           try {
-            await updateDoc(doc(db, 'games', activeGameDocId), { 
+            await updateDoc(doc(db, 'games', activeGameDocId), {
               status: 'finished',
-              isGameActive: false 
+              isGameActive: false
             });
           } catch (e) {
             console.error("Erreur fin de partie Firestore:", e);
           }
         }
 
-        // Formater les résultats pour GameOverScreen
         const results = players.map(p => ({
           name: p.name,
           score: playerScores[p.id] || 0,
@@ -220,25 +210,23 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     <SafeContainer>
       {isGuessCorrect && <Confetti />}
       <Animated.View style={[styles.container, { opacity: anims.bgFade }]}>
-        
-        {/* HEADER WITH QUIT BUTTON */}
+
         <View style={styles.header}>
           <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
             <Ionicons name="close" size={24} color="#FF6B6B" />
           </TouchableOpacity>
-          <Text style={styles.roundTitle}>MANCHE {round} / {maxRounds}</Text>
+          <Text style={styles.roundTitle}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
           <View style={{ width: 40 }} />
         </View>
 
-        {/* RESULT BANNER (POPUP) */}
         {bannerVisible && (
-          <Animated.View 
+          <Animated.View
             {...panResponder.panHandlers}
             style={[
-              styles.resultBannerPopup, 
-              { 
+              styles.resultBannerPopup,
+              {
                 opacity: anims.bannerFade,
-                transform: [{ translateY: anims.bannerY }] 
+                transform: [{ translateY: anims.bannerY }]
               }
             ]}
           >
@@ -250,8 +238,8 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
                 <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
               </View>
               <View style={styles.bannerTextContainer}>
-                <Text style={styles.resultBannerText}>{isGuessCorrect ? "CORRECT !" : (selectedPlayer ? "INCORRECT" : "TEMPS ÉCOULÉ")}</Text>
-                {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} pts</Text>}
+                <Text style={styles.resultBannerText}>{isGuessCorrect ? t('bravo') : (selectedPlayer ? t('missed') : t('timeout'))}</Text>
+                {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} {t('points_short')}</Text>}
               </View>
             </LinearGradient>
           </Animated.View>
@@ -268,12 +256,12 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
             )}
             <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
           </Animated.View>
-          
+
           <Animated.View style={[styles.trackInfo, { opacity: anims.infoFade }]}>
             <Text style={styles.trackTitle} numberOfLines={1}>{safeTrack.title}</Text>
             <Text style={styles.trackArtist}>{safeTrack.artist}</Text>
             <View style={styles.ownerInfo}>
-              <Text style={styles.ownerText}>appartient à </Text>
+              <Text style={styles.ownerText}>{t('it_was')} </Text>
               {correctPlayerObj?.image ? (
                 <Image source={{ uri: correctPlayerObj.image }} style={styles.ownerAvatar} />
               ) : (
@@ -286,11 +274,10 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
           </Animated.View>
         </View>
 
-          {/* INDEPENDENTLY SCROLLABLE SCOREBOARD */}
           <View style={styles.scoreboardWrapper}>
-            <Text style={styles.scoreboardTitle}>CLASSEMENT ACTUEL</Text>
-            <ScrollView 
-              style={styles.scoreboardScroll} 
+            <Text style={styles.scoreboardTitle}>{t('results')}</Text>
+            <ScrollView
+              style={styles.scoreboardScroll}
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.scoreboardContent}
             >
@@ -300,28 +287,17 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
                   const currentPScore = playerScores[player.id] || 0;
                   const prevPScore = previousScores[player.id] || 0;
                   const hasGainedPoints = currentPScore > prevPScore;
-                  
+
                   return (
-                    <View key={player.id} style={[
-                      styles.scoreRow,
-                      hasGainedPoints ? styles.scoreRowCorrect : styles.scoreRowIncorrect
-                    ]}>
+                    <View key={player.id} style={[styles.scoreRow, hasGainedPoints ? styles.scoreRowCorrect : styles.scoreRowIncorrect]}>
                       <View style={styles.scorePlayerInfo}>
                         <Text style={styles.rankNumber}>#{index + 1}</Text>
-                        {player.image ? (
-                          <Image source={{ uri: player.image }} style={styles.scoreAvatar} />
-                        ) : (
-                          <View style={[styles.scoreAvatar, { backgroundColor: player.color }]}>
-                            <Text style={{ fontSize: 14 }}>{player.emoji}</Text>
-                          </View>
-                        )}
+                        {!!player.image ? (<Image source={{ uri: player.image }} style={styles.scoreAvatar} />) : (<View style={[styles.scoreAvatar, { backgroundColor: player.color }]}><Text style={{ fontSize: 14 }}>{player.emoji}</Text></View>)}
                         <Text style={styles.scorePlayerName} numberOfLines={1}>{player.name}</Text>
                       </View>
                       <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.scoreTotal}>{currentPScore} pts</Text>
-                        {hasGainedPoints && (
-                          <Text style={styles.pointsGainedText}>+{currentPScore - prevPScore}</Text>
-                        )}
+                        <Text style={styles.scoreTotal}>{currentPScore} {t('points_short')}</Text>
+                        {hasGainedPoints ? (<Text style={styles.pointsGainedText}>+{currentPScore - prevPScore}</Text>) : null}
                       </View>
                     </View>
                   );
@@ -329,12 +305,11 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
             </ScrollView>
           </View>
 
-        {/* FOOTER */}
         <Animated.View style={[styles.footer, { opacity: anims.buttonFade }]}>
           <PressableCard onPress={handleNext} style={{ width: '100%' }}>
             <LinearGradient colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.nextButton}>
               <Text style={styles.nextButtonText}>
-                {round >= maxRounds ? "Voir les résultats" : `Manche Suivante (${autoNextTime}s)`}
+                {round >= maxRounds ? t('show_results') : `${t('next_round')} (${autoNextTime}s)`}
               </Text>
               <Ionicons name={round >= maxRounds ? "stats-chart" : "arrow-forward"} color="white" size={24} />
             </LinearGradient>
@@ -419,7 +394,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 10,
-    paddingTop: 80, // Espace pour la bannière absolue au début
+    paddingTop: 80,
   },
   coverImage: {
     width: width * 0.45,
@@ -492,7 +467,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   scoreboardWrapper: {
-    flex: 1, // This makes the scoreboard take all available space
+    flex: 1,
     paddingHorizontal: 20,
     marginTop: 10,
   },

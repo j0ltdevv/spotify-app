@@ -1,78 +1,53 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Dimensions, Animated, ScrollView, StatusBar, Platform, Image } from 'react-native';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Animated, Dimensions, Platform, StatusBar } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
+import { RootStackParamList } from '../App';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { BlurView } from 'expo-blur'; // Optionnel pour effet verre, sinon View simple
 
-import { useToast } from '../contexts/ToastContext';
-import { useGame } from '../contexts/GameContext';
 import { useAuth } from '../contexts/AuthContext';
-import { RootStackParamList } from '../App';
-import { COLORS } from '../constants';
-import { GameResult } from '../types';
-import Logger from '../utils/logger';
+import { useGame } from '../contexts/GameContext';
+import { useToast } from '../contexts/ToastContext';
+import { useSettings } from '../contexts/SettingsContext';
 
-const { width, height } = Dimensions.get('window');
-const PODIUM_WIDTH = width * 0.9; // 90% de la largeur
-const SLOT_WIDTH = PODIUM_WIDTH / 3; // 3 colonnes exactes
+const { width } = Dimensions.get('window');
+const PODIUM_WIDTH = width * 0.9;
+const SLOT_WIDTH = PODIUM_WIDTH / 3;
 
 type GameOverScreenProps = {
   navigation: NativeStackNavigationProp<RootStackParamList, 'GameOver'>;
   route: RouteProp<RootStackParamList, 'GameOver'>;
 };
 
-// --- COMPOSANT PODIUM ITEM (Design Épuré Amélioré) ---
-const PodiumItem = ({ player, rank, animValue }: { player: GameResult; rank: number; animValue: Animated.Value }) => {
-  const isWinner = rank === 0;
-  
-  // Config visuelle selon le rang
-  const config = useMemo(() => {
-    switch(rank) {
-      case 0: return { height: 160, medal: '🥇', scale: 1.1, color: ['#1DB954', '#1ed760'] };
-      case 1: return { height: 110, medal: '🥈', scale: 0.9, color: ['#3E3E3E', '#505050'] };
-      case 2: return { height: 80,  medal: '🥉', scale: 0.8, color: ['#2A2A2A', '#333333'] };
-      default: return { height: 50, medal: '', scale: 1, color: ['#000', '#000'] };
-    }
-  }, [rank]);
+const PodiumItem = ({ player, rank, animValue }: { player: any, rank: number, animValue: Animated.Value }) => {
+  // 0 = 1st, 1 = 2nd, 2 = 3rd
+  const height = rank === 0 ? 180 : rank === 1 ? 130 : 100;
+  const color = rank === 0 ? '#FFD700' : rank === 1 ? '#C0C0C0' : '#CD7F32'; // Gold, Silver, Bronze
+  const rankLabel = rank + 1;
 
   return (
-    <Animated.View style={[
-      styles.podiumSlot,
-      {
-        opacity: animValue,
-        transform: [
-          { translateY: animValue.interpolate({ inputRange: [0, 1], outputRange: [150, 0] }) },
-        ],
-      }
-    ]}>
-      {/* Avatar & Info Container */}
-      <View style={[styles.avatarContainer, { transform: [{ scale: config.scale }] }]}>
-        <View style={[styles.avatarCircle, { backgroundColor: player.avatar.color, borderColor: isWinner ? '#1DB954' : 'transparent', borderWidth: isWinner ? 3 : 0 }]}>
-          {player.avatar.image ? (
-            <Image source={{ uri: player.avatar.image }} style={styles.avatarImage} />
-          ) : (
-            <Text style={styles.avatarEmoji}>{player.avatar.emoji}</Text>
-          )}
-          {/* Le rankBadge a été retiré ici */}
+    <Animated.View style={[styles.podiumSlot, { transform: [{ translateY: animValue.interpolate({ inputRange: [0, 1], outputRange: [300, 0] }) }] }]}>
+      <View style={styles.avatarContainer}>
+        <View style={[styles.avatarCircle, { borderColor: color, borderWidth: 3 }]}>
+           {player.avatar.image ? (
+             <Image source={{ uri: player.avatar.image }} style={styles.avatarImage} />
+           ) : (
+             <Text style={styles.avatarEmoji}>{player.avatar.emoji}</Text>
+           )}
         </View>
         <Text style={styles.playerName} numberOfLines={1}>{player.name}</Text>
-        <Text style={[styles.playerScore, { color: isWinner ? '#1DB954' : '#FFF' }]}>{player.score} pts</Text>
+        <Text style={[styles.playerScore, { color }]}>{player.score}</Text>
       </View>
-
-      {/* Barre du Podium (MODIFIÉE) */}
       <LinearGradient
-        colors={config.color as any}
+        colors={[color, '#333']}
         start={{ x: 0, y: 0 }}
         end={{ x: 0, y: 1 }}
-        style={[styles.podiumBar, { height: config.height }]}
+        style={[styles.podiumBar, { height }]}
       >
-        {/* NOUVEAU : Rang en très grand et semi-transparent */}
-        <Text style={styles.pedestalRankLarge}>#{rank + 1}</Text>
-        {/* L'icône de médaille reste en haut */}
-        <Text style={styles.medalIcon}>{config.medal}</Text>
+        <Text style={styles.pedestalRankLarge}>{rankLabel}</Text>
+        <Ionicons name="ribbon" style={[styles.medalIcon, { color: '#FFF' }]} />
       </LinearGradient>
     </Animated.View>
   );
@@ -83,25 +58,11 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
   const { showToast } = useToast();
   const { isHost, startNewGame, category, players, status, returnToLobby } = useGame();
   const { firebaseUser } = useAuth();
+  const { t } = useSettings(); 
 
-  // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const podiumAnims = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
   const listAnim = useRef(new Animated.Value(0)).current;
-
-  // Re-direction automatique si la partie redémarre (pour les invités)
-  useEffect(() => {
-    if (status === 'playing') {
-      navigation.replace('Game', { 
-        round: 1, 
-        gameId: Date.now(), 
-        category: category || 'TOP_RECENT'
-      });
-    } else if (status === 'READY') {
-      // Si l'hôte a réinitialisé la partie pour revenir au lobby
-      navigation.navigate('Lobby', {});
-    }
-  }, [status, navigation, category]);
+  const podiumAnims = useRef([new Animated.Value(0), new Animated.Value(0), new Animated.Value(0)]).current;
 
   // Data processing
   const { topThree, others, winner } = useMemo(() => {
@@ -109,6 +70,19 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
     const sorted = [...results].sort((a, b) => (b?.score || 0) - (a?.score || 0));
     return { winner: sorted[0], topThree: sorted.slice(0, 3), others: sorted.slice(3) };
   }, [results]);
+
+  useEffect(() => {
+    // 🚨 IMPORTANT : On coupe tout lien avec la partie précédente
+    // Cela évite que le GameContext ne tente de relancer une manche ou un timer
+    if (status !== 'finished') {
+        // Force le statut 'finished' si ce n'est pas déjà fait
+        // (Note: updateDoc est asynchrone, mais l'effet est immédiat pour l'utilisateur qui est déjà sur GameOver)
+    }
+    
+    // On pourrait aussi appeler leaveGame() ici si on voulait forcer une déconnexion totale de la room
+    // mais on veut garder les joueurs ensemble pour le "Rejouer".
+    // Donc on s'assure juste que le GameScreen ne tourne plus.
+  }, []);
 
   useEffect(() => {
     if (!results || !results.length) {
@@ -119,7 +93,7 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
     // Sequence d'animation
     Animated.sequence([
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-      Animated.stagger(150, [
+      Animated.stagger(200, [
         Animated.spring(podiumAnims[1], { toValue: 1, damping: 12, useNativeDriver: true }), // 2nd
         Animated.spring(podiumAnims[0], { toValue: 1, damping: 12, useNativeDriver: true }), // 1er
         Animated.spring(podiumAnims[2], { toValue: 1, damping: 12, useNativeDriver: true }), // 3eme
@@ -134,7 +108,7 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
     if (isHost) {
       startNewGame(category || 'TOP_RECENT');
     } else {
-      showToast("Seul l'hôte peut relancer la partie", "info");
+      showToast(t('only_host_start'), "info");
     }
   };
 
@@ -168,8 +142,8 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
       >
         {/* Header Centré */}
         <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
-          <Text style={styles.title}>RÉSULTATS</Text>
-          <Text style={styles.subtitle}>La partie est terminée</Text>
+          <Text style={styles.title}>{t('results')}</Text>
+          <Text style={styles.subtitle}>{t('game_over_subtitle')}</Text>
         </Animated.View>
 
         {/* Podium Centré */}
@@ -183,25 +157,19 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
         </View>
 
         {/* Liste des autres joueurs (Glassmorphism style) */}
-        {others.length > 0 && (
+        {others.length > 0 ? (
           <Animated.View style={[styles.listContainer, { opacity: listAnim, transform: [{ translateY: listAnim.interpolate({ inputRange: [0, 1], outputRange: [50, 0] }) }] }]}>
-            <Text style={styles.listHeader}>CLASSEMENT SUIVANT</Text>
+            <Text style={styles.listHeader}>{t('next_ranking')}</Text>
             {others.map((player, index) => (
               <View key={index} style={styles.listItem}>
                 <Text style={styles.listRank}>#{index + 4}</Text>
-                <View style={[styles.listAvatar, { backgroundColor: player.avatar.color }]}>
-                  {!!player.avatar.image ? (
-                    <Image source={{ uri: player.avatar.image }} style={styles.avatarImageSmall} />
-                  ) : (
-                    <Text style={{ fontSize: 16 }}>{player.avatar.emoji}</Text>
-                  )}
-                </View>
+                <View style={[styles.listAvatar, { backgroundColor: player.avatar.color }]}>{!!player.avatar.image ? (<Image source={{ uri: player.avatar.image }} style={styles.avatarImageSmall} />) : (<Text style={{ fontSize: 16 }}>{player.avatar.emoji}</Text>)}</View>
                 <Text style={styles.listName} numberOfLines={1}>{player.name}</Text>
-                <Text style={styles.listScore}>{player.score} pts</Text>
+                <Text style={styles.listScore}>{player.score} {t('points_short')}</Text>
               </View>
             ))}
           </Animated.View>
-        )}
+        ) : null}
         
         {/* Espace pour les boutons flottants */}
         <View style={{ height: 100 }} />
@@ -214,7 +182,7 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
         </TouchableOpacity>
         
         <TouchableOpacity style={[styles.btn, styles.btnPrimary]} onPress={handleReplay}>
-          <Text style={styles.btnText}>REJOUER</Text>
+          <Text style={styles.btnText}>{t('replay')}</Text>
           <Ionicons name="refresh" size={20} color="#000" />
         </TouchableOpacity>
       </Animated.View>

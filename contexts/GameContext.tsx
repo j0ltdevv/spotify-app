@@ -18,10 +18,11 @@ interface GameState {
   roomCode?: string;
   hostId?: string;
   players: Player[];
-  status: 'waiting' | 'READY' | 'playing' | 'finished';
+  status: 'waiting' | 'READY' | 'playing' | 'revealing' | 'finished';
   currentTrack?: any;
   playlist?: GameTrack[]; // Verified sequence of tracks
   trackPool: SpotifyTrack[];
+  votes: string[]; // Track who voted in the current round
   setup: {
     tracksPrepared: boolean;
     preparedAt?: any;
@@ -34,6 +35,7 @@ interface GameContextType extends GameState {
   returnToLobby: () => Promise<void>;
   nextRound: () => void;
   updatePlayerScore: (playerId: string, score: number) => void;
+  registerVote: (playerId: string) => void;
   addPlayedTrack: (trackId: string) => void;
   setGameTrack: (track: any) => void;
   setGamePlaylist: (playlist: GameTrack[]) => void;
@@ -62,6 +64,7 @@ const getInitialGameState = (): GameState => ({
   currentTrack: null,
   playlist: [],
   trackPool: [],
+  votes: [],
   setup: {
     tracksPrepared: false,
   },
@@ -85,10 +88,30 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubscribe = onSnapshot(gameDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const firestoreState = docSnap.data() as GameState;
-          console.log(`🔥 [GameContext] Snapshot received! Status: ${firestoreState.status}, Round: ${firestoreState.currentRound}, Track: ${firestoreState.currentTrack?.title}`);
+          
+          // 🛡️ Protection anti-rollback : ignorer les snapshots périmés (Round X -> Round X-1)
+          // Sauf si c'est un reset de partie (gameId différent ou status 'waiting')
+          if (firestoreState.gameId === gameState.gameId && 
+              firestoreState.status !== 'waiting' &&
+              firestoreState.currentRound < gameState.currentRound) {
+             // console.warn(`🔥 [GameContext] 🛡️ Ignoring stale snapshot. Local Round: ${gameState.currentRound}, Received: ${firestoreState.currentRound}`);
+             return;
+          }
+
+          // console.log(`🔥 [GameContext] Snapshot received! Status: ${firestoreState.status}, Round: ${firestoreState.currentRound}, Track: ${firestoreState.currentTrack?.title}`);
+          
+          // HOST LOGIC: Check if all players have voted
+          if (firestoreState.hostId === firebaseUser.uid && 
+              firestoreState.status === 'playing' && 
+              firestoreState.votes && 
+              firestoreState.votes.length >= firestoreState.players.length) {
+              // console.log("🔥 [GameContext] All players voted! Switching to REVEALING.");
+              updateDoc(doc(db, 'games', firestoreState.hostId), { status: 'revealing' });
+          }
+
           setGameState(firestoreState);
         } else {
-          console.log("🔥 [GameContext] Game document does not exist (or was deleted). Resetting state.");
+          // console.log("🔥 [GameContext] Game document does not exist (or was deleted). Resetting state.");
           setGameState(getInitialGameState());
           setActiveGameDocId(null);
           setLocalPlayedTracks(new Set()); // Clear local history on reset
@@ -237,6 +260,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentTrack: null,
       playlist: [], // Clear old playlist
       trackPool: [], // Clear old pool
+      votes: [], // Clear votes
       isGameActive: true,
       "setup.tracksPrepared": false // Allow reloading tracks
     });
@@ -251,6 +275,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       currentRound: 1,
       gameId: Date.now(),
       playedTracks: [], // Reset played tracks for new match
+      votes: [], // Clear votes
       currentTrack: null // Reset shared track
     };
     updateDoc(doc(db, 'games', activeGameDocId), updates);
@@ -258,12 +283,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const nextRound = () => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log(`🔥 [GameContext] Requesting next round. Current: ${gameState.currentRound}`);
-    if (gameState.currentRound >= (gameState.players.length * 2)) { // Example logic
-      updateDoc(doc(db, 'games', activeGameDocId), { status: 'finished' });
-    } else {
-      updateDoc(doc(db, 'games', activeGameDocId), { currentRound: gameState.currentRound + 1 });
+    
+    // GUARD: If game is already finished, do NOT proceed
+    if (gameState.status === 'finished') {
+        console.warn("🔥 [GameContext] nextRound aborted: Game is already finished.");
+        return;
     }
+
+    console.log(`🔥 [GameContext] Requesting next round. Current: ${gameState.currentRound}`);
+    // Assuming maxRounds is passed via route params, but here we can use a safe default or check playlist length
+    // For safety, let's assume 10 rounds max if we can't determine it easily here, or rely on GameScreen to navigate to GameOver
+    // But GameContext should also know when to stop.
+    // Let's use a conservative check: if round > 50 it's definitely a bug.
+    // Better: relies on GameScreen logic for now, but prevent infinite loop if status is 'finished'
+    
+    updateDoc(doc(db, 'games', activeGameDocId), { 
+        currentRound: gameState.currentRound + 1,
+        votes: [], 
+        status: 'playing' 
+    });
   };
 
   const updatePlayerScore = (playerId: string, score: number) => {
@@ -271,6 +309,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     console.log(`🔥 [GameContext] Updating score for ${playerId}: +${score}`);
     const currentScore = gameState.playerScores[playerId] || 0;
     updateDoc(doc(db, 'games', activeGameDocId), { [`playerScores.${playerId}`]: currentScore + score });
+  };
+
+  const registerVote = (playerId: string) => {
+    if (!activeGameDocId) return;
+    console.log(`🔥 [GameContext] Registering vote for ${playerId}`);
+    updateDoc(doc(db, 'games', activeGameDocId), { votes: arrayUnion(playerId) });
   };
 
   const addPlayedTrack = (trackId: string) => {
@@ -338,6 +382,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     returnToLobby,
     nextRound,
     updatePlayerScore,
+    registerVote,
     addPlayedTrack,
     setGameTrack,
     setGamePlaylist,
