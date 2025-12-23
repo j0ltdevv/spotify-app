@@ -486,7 +486,7 @@ class MusicService {
 
   /**
    * Trouve un track jouable avec preview audio (iTunes prioritaire)
-   * VERSION OPTIMISÉE : Recherche par lots parallèles
+   * VERSION OPTIMISÉE : Recherche par lots parallèles (Batches de 5)
    */
   public async findPlayableTrack(
     tracks: SpotifyTrack[],
@@ -510,22 +510,35 @@ class MusicService {
         tracks.filter(t => !excludedTrackIds.includes(t.id) && !this.recentHistory.has(t.id))
     );
 
-    console.log(`\n🔍 Recherche séquentielle d'un track jouable parmi ${availableTracks.length} tracks... (Mode Prefetch: ${isPrefetch})`);
+    console.log(`\n🔍 Recherche parallèle d'un track jouable parmi ${availableTracks.length} tracks... (Mode Prefetch: ${isPrefetch})`);
 
-    for (const track of availableTracks) {
-      const result = await this.checkSingleTrack(track);
-      if (result && result.success) {
-        console.log(`\n🏆 GAGNANT TROUVÉ: ${result.track?.title}`);
+    const BATCH_SIZE = 5;
+    
+    // Process tracks in batches
+    for (let i = 0; i < availableTracks.length; i += BATCH_SIZE) {
+      const batch = availableTracks.slice(i, i + BATCH_SIZE);
+      console.log(`   ⚡ Traitement du lot ${Math.floor(i / BATCH_SIZE) + 1} (${batch.length} titres)...`);
+
+      // Launch checks in parallel
+      const promises = batch.map(track => this.checkSingleTrack(track));
+      const results = await Promise.all(promises);
+
+      // Find the first success in the batch
+      const winner = results.find(r => r && r.success && r.track);
+      
+      if (winner) {
+        console.log(`\n🏆 GAGNANT TROUVÉ: ${winner.track?.title}`);
         
-        if (result.track) {
-          this.recentHistory.add(result.track.id);
+        if (winner.track) {
+          this.recentHistory.add(winner.track.id);
         }
 
         if (!isPrefetch) {
-          this.prefetchNextTrack(tracks, [...excludedTrackIds, result.track!.id]);
+          // Prefetch next one in background
+          this.prefetchNextTrack(tracks, [...excludedTrackIds, winner.track!.id]);
         }
         
-        return result;
+        return winner;
       }
     }
 

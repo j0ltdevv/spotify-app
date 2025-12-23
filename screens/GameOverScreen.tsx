@@ -88,13 +88,14 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
   // --- LOGIQUE DE REDIRECTION BLINDÉE ---
   useEffect(() => {
     if (status === 'playing' && contextGameId !== finishedGameId.current) {
-      // console.log("🎮 [GameOver] Nouvelle partie détectée ! Redirection...");
+      console.log(`🔍 [NAV] 🧭 GameOver -> Game detected! New Game ID: ${contextGameId}`);
       navigation.replace('Game', { 
         round: 1, 
         gameId: contextGameId || Date.now(), 
         category: category || 'TOP_RECENT'
       });
     } else if (status === 'READY') {
+      console.log("🔍 [NAV] 🧭 GameOver -> Lobby detected (READY status)");
       navigation.navigate('Lobby', {});
     }
   }, [status, contextGameId, navigation, category]);
@@ -127,7 +128,13 @@ export default function GameOverScreen({ navigation, route }: GameOverScreenProp
   const handleReplay = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     if (isHost) {
-      startNewGame(category || 'TOP_RECENT');
+      if (startNewGame) {
+        console.log("🎮 [GameOver] Host requesting new game...");
+        startNewGame(category || 'TOP_RECENT');
+      } else {
+        console.error("startNewGame is undefined in GameOverScreen");
+        showToast("Erreur interne: fonction de redémarrage manquante", "error");
+      }
     } else {
       showToast(t('only_host_start'), "info");
     }
