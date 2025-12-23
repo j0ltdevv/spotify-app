@@ -74,6 +74,15 @@ export default function GameScreen(props: {
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const anims = { loadingIcon: useRef(new Animated.Value(1)).current };
 
+  // --- 🔥 PARANOID LOGGING & LIFECYCLE ---
+  useEffect(() => {
+     console.log(`🔍 [LIFECYCLE] 🟢 MOUNT GameScreen (Round ${round})`);
+     console.log(`🔍 [DATA] 📊 Scores Hash/Len: ${JSON.stringify(playerScores).length} chars`);
+     return () => {
+         console.log(`🔍 [LIFECYCLE] 🔴 UNMOUNT GameScreen (Round ${round})`);
+     };
+  }, [round]);
+
   // Sync ref with state for track
   useEffect(() => {
     currentTrackRef.current = currentTrack;
@@ -285,16 +294,32 @@ export default function GameScreen(props: {
 
     try {
       if (track.preview_url) {
-        console.log("🎮 [GameScreen] Requesting SoundManager to play...");
+        console.log("🔍 [AUDIO] ⏳ GameScreen requesting SoundManager to play...");
         await SoundManager.stopSound();
         await SoundManager.playSound(track.preview_url, track.id);
+        console.log("🔍 [AUDIO] ✅ GameScreen received control back from SoundManager.");
+        
+        // Only start the game loop if sound is confirmed valid
+        setScreenStatus('PLAYING'); 
+        setHasVoted(false); 
       } else {
-        console.warn("🎮 [GameScreen] No preview URL for this track.");
-        showToast(t('no_preview'), "info");
+        console.warn("🎮 [GameScreen] No preview URL for this track. Aborting round start.");
+        showToast(t('no_preview'), "error");
+        
+        // Force retry logic if host
+        if (isHost) {
+             console.log("🎮 [GameScreen] Host forcing round retry due to missing preview...");
+             // Slightly delay to avoid infinite fast loops
+             setTimeout(() => {
+                 roundLock.current = 0; // Unlock
+                 // Trigger re-render/re-fetch by updating params slightly or just forcing reload logic
+                 // Since we are inside the component, we can just call loadRoundData logic again via navigation reset or similar
+                 // Safest is to replace screen to reset state completely
+                 navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
+             }, 1000);
+        }
+        return;
       }
-      
-      setScreenStatus('PLAYING'); 
-      setHasVoted(false); 
 
     } catch (error) {
       Logger.error("Erreur en démarrant le son", { error, track });

@@ -19,10 +19,11 @@ interface GameState {
   hostId?: string;
   players: Player[];
   status: 'waiting' | 'READY' | 'playing' | 'revealing' | 'finished';
-  currentTrack?: any;
+  currentTrack?: GameTrack | null;
   playlist?: GameTrack[]; // Verified sequence of tracks
   trackPool: SpotifyTrack[];
   votes: string[]; // Track who voted in the current round
+  readyPlayers: string[]; // Players who clicked "Next" in Reveal
   setup: {
     tracksPrepared: boolean;
     preparedAt?: any;
@@ -34,10 +35,11 @@ interface GameContextType extends GameState {
   markSetupAsComplete: () => void;
   returnToLobby: () => Promise<void>;
   nextRound: () => void;
+  markPlayerReady: () => void;
   updatePlayerScore: (playerId: string, score: number) => void;
   registerVote: (playerId: string) => void;
   addPlayedTrack: (trackId: string) => void;
-  setGameTrack: (track: any) => void;
+  setGameTrack: (track: GameTrack | null) => void;
   setGamePlaylist: (playlist: GameTrack[]) => void;
   addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>;
   addBot: () => Promise<void>;
@@ -65,6 +67,7 @@ const getInitialGameState = (): GameState => ({
   playlist: [],
   trackPool: [],
   votes: [],
+  readyPlayers: [],
   setup: {
     tracksPrepared: false,
   },
@@ -88,30 +91,57 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubscribe = onSnapshot(gameDocRef, (docSnap) => {
         if (docSnap.exists()) {
           const firestoreState = docSnap.data() as GameState;
+          const source = docSnap.metadata.hasPendingWrites ? "Local" : "Server";
           
+          console.log(`🔍 [CTX] 🔥 SNAPSHOT RECEIVED from Firestore! 
+          > 📡 Source: ${source}
+          > DocID: ${gameDocRef.id}
+          > Status: ${firestoreState.status}
+          > Round: ${firestoreState.currentRound}
+          > Host: ${firestoreState.hostId}
+          > PlaylistSize: ${firestoreState.playlist?.length}
+          > CurrentTrack: ${firestoreState.currentTrack?.title}
+          `);
+
           // 🛡️ Protection anti-rollback : ignorer les snapshots périmés (Round X -> Round X-1)
           // Sauf si c'est un reset de partie (gameId différent ou status 'waiting')
           if (firestoreState.gameId === gameState.gameId && 
               firestoreState.status !== 'waiting' &&
               firestoreState.currentRound < gameState.currentRound) {
-             // console.warn(`🔥 [GameContext] 🛡️ Ignoring stale snapshot. Local Round: ${gameState.currentRound}, Received: ${firestoreState.currentRound}`);
+             console.warn(`🔍 [CTX] 🛑 IGNORING STALE SNAPSHOT. Local Round: ${gameState.currentRound}, Received: ${firestoreState.currentRound}`);
              return;
           }
 
-          // console.log(`🔥 [GameContext] Snapshot received! Status: ${firestoreState.status}, Round: ${firestoreState.currentRound}, Track: ${firestoreState.currentTrack?.title}`);
-          
-          // HOST LOGIC: Check if all players have voted
+          // HOST LOGIC: Check if all players have voted (during playing)
           if (firestoreState.hostId === firebaseUser.uid && 
               firestoreState.status === 'playing' && 
               firestoreState.votes && 
               firestoreState.votes.length >= firestoreState.players.length) {
-              // console.log("🔥 [GameContext] All players voted! Switching to REVEALING.");
+              console.log(`🔍 [CTX] 🗳️ ALL VOTES RECEIVED. Switching to REVEALING.`);
               updateDoc(doc(db, 'games', firestoreState.hostId), { status: 'revealing' });
+          }
+
+          // HOST LOGIC: Check if all players are READY for next round (during revealing)
+          if (firestoreState.hostId === firebaseUser.uid &&
+              firestoreState.status === 'revealing' &&
+              firestoreState.readyPlayers &&
+              firestoreState.readyPlayers.length >= firestoreState.players.length) {
+              console.log(`🔍 [CTX] 🚀 ALL PLAYERS READY (${firestoreState.readyPlayers.length}). Auto-starting next round.`);
+              
+              // Direct update to avoid circular dependency with nextRound function if defined below
+              // But we can just duplicate the nextRound logic here for safety or move nextRound up.
+              // Simpler: Just do the update.
+              updateDoc(doc(db, 'games', firestoreState.hostId), { 
+                currentRound: firestoreState.currentRound + 1,
+                votes: [], 
+                readyPlayers: [], // Reset ready status
+                status: 'playing' 
+              });
           }
 
           setGameState(firestoreState);
         } else {
-          // console.log("🔥 [GameContext] Game document does not exist (or was deleted). Resetting state.");
+          console.log("🔍 [CTX] 🗑️ Game document does not exist (or was deleted). Resetting state.");
           setGameState(getInitialGameState());
           setActiveGameDocId(null);
           setLocalPlayedTracks(new Set()); // Clear local history on reset
@@ -120,13 +150,14 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
     return () => {
       if (unsubscribe) {
-          console.log("🔥 [GameContext] Unsubscribing from game doc.");
+          console.log("🔍 [CTX] 🔌 Unsubscribing from game doc.");
           unsubscribe();
       }
     };
   }, [activeGameDocId, isAuthLoading, firebaseUser]);
 
   const createGame = async (): Promise<string> => {
+    // ... (rest of createGame remains same, just ensure context is preserved if needed, but here we focus on snapshot/nextRound)
     if (!firebaseUser) throw new Error("Must be logged in");
     console.log("🔥 [GameContext] Creating new game...");
     
@@ -151,8 +182,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const newGame: GameState = {
       ...getInitialGameState(),
       gameId: Date.now(),
-      userId: firebaseUser.uid, // Explicitly set userId
-      isGameActive: true,      // Explicitly set game as active
+      userId: firebaseUser.uid, 
+      isGameActive: true,      
       roomCode: code,
       hostId: firebaseUser.uid,
       players: [JSON.parse(JSON.stringify(hostPlayer))],
@@ -230,6 +261,12 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
+  const markPlayerReady = () => {
+    if (!activeGameDocId || !firebaseUser) return;
+    console.log(`🔥 [GameContext] Player ${firebaseUser.uid} is ready for next round.`);
+    updateDoc(doc(db, 'games', activeGameDocId), { readyPlayers: arrayUnion(firebaseUser.uid) });
+  };
+
   const markSetupAsComplete = () => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
     console.log("🔥 [GameContext] Marking setup as complete.");
@@ -282,24 +319,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const nextRound = () => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔍 [CTX] 👉 nextRound CALLED! 
+    > IsHost: ${firebaseUser?.uid === gameState.hostId}
+    > ActiveDoc: ${activeGameDocId}
+    > CurrentStatus: ${gameState.status}
+    > CurrentRound: ${gameState.currentRound}`);
+
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) {
+        console.warn("🔍 [CTX] ❌ nextRound ABORTED: Not Host or No Active Game.");
+        return;
+    }
     
     // GUARD: If game is already finished, do NOT proceed
     if (gameState.status === 'finished') {
-        console.warn("🔥 [GameContext] nextRound aborted: Game is already finished.");
+        console.warn("🔍 [CTX] 🛑 nextRound ABORTED: Game is already finished.");
         return;
     }
 
-    console.log(`🔥 [GameContext] Requesting next round. Current: ${gameState.currentRound}`);
-    // Assuming maxRounds is passed via route params, but here we can use a safe default or check playlist length
-    // For safety, let's assume 10 rounds max if we can't determine it easily here, or rely on GameScreen to navigate to GameOver
-    // But GameContext should also know when to stop.
-    // Let's use a conservative check: if round > 50 it's definitely a bug.
-    // Better: relies on GameScreen logic for now, but prevent infinite loop if status is 'finished'
+    console.log(`🔍 [CTX] ✅ EXECUTING UPDATE: Round ${gameState.currentRound} -> ${gameState.currentRound + 1}, Status -> playing`);
     
     updateDoc(doc(db, 'games', activeGameDocId), { 
         currentRound: gameState.currentRound + 1,
         votes: [], 
+        readyPlayers: [], // Reset ready players
         status: 'playing' 
     });
   };
@@ -381,6 +423,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     markSetupAsComplete,
     returnToLobby,
     nextRound,
+    markPlayerReady,
     updatePlayerScore,
     registerVote,
     addPlayedTrack,

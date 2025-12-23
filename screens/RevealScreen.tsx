@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder, ActivityIndicator } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
@@ -35,10 +35,42 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     playerScores = {}, previousScores = {},
     selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS
   } = route.params;
+  const { players, leaveGame, isHost, activeGameDocId, currentRound, status: gameStatus, nextRound, markPlayerReady, readyPlayers } = useGame();
   const { firebaseUser } = useAuth();
-  const { players, leaveGame, isHost, activeGameDocId } = useGame();
   const { showToast } = useToast();
   const { t } = useSettings();
+
+  const [isReady, setIsReady] = useState(false); // Local UI state
+
+  console.log(`🔍 [REVEAL] Screen MOUNTED/RENDERED. 
+  > Round: ${round} 
+  > ContextRound: ${currentRound}
+  > GameStatus: ${gameStatus}
+  > IsHost: ${isHost}
+  > ReadyPlayers: ${readyPlayers?.length}/${players.length}`);
+
+  // 🐛 FIX CRITIQUE : Ecouteur passif pour les Invités
+  // Si l'hôte force le passage au round suivant, on doit suivre même si on n'a pas cliqué
+  useEffect(() => {
+    if (gameStatus === 'playing' && currentRound > round) {
+        console.log(`🔍 [REVEAL] 🚀 DETECTED NEW ROUND FROM CONTEXT! Navigating automatically...
+        > My Local Round: ${round}
+        > Context Round: ${currentRound}
+        `);
+        
+        // Nettoyage avant départ
+        if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+        if (countdownInterval.current) clearInterval(countdownInterval.current);
+        SoundManager.stopSound();
+
+        navigation.replace('Game', {
+            round: currentRound,
+            playerScores,
+            category,
+            maxRounds
+        });
+    }
+  }, [currentRound, gameStatus, round, navigation]);
 
   const safeTrack: GameTrack = track || { id: '', title: t('unknown_title'), artist: t('unknown_artist'), album: t('unknown_album'), albumImage: '', preview_url: '', correctPlayer: '?' };       
 
@@ -151,178 +183,425 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       });
     }, 1000);
 
-    nextRoundTimer.current = setTimeout(() => {
-      handleNext();
-    }, 8000);
+        // Only set auto timer if HOST. 
 
-    return () => {
-      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
-      if (countdownInterval.current) clearInterval(countdownInterval.current);
-      SoundManager.stopSound();
-    };
-  }, []);
+        // Logic: If everyone is ready before 10s, Context will trigger nextRound.
 
-  const handleNext = async () => {
-    if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
-    if (countdownInterval.current) clearInterval(countdownInterval.current);
+        // If not, this timer will FORCE nextRound.
 
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        if (isHost) {
 
-    if (round >= maxRounds) {
-        if (isHost && activeGameDocId) {
-          try {
-            await updateDoc(doc(db, 'games', activeGameDocId), {
-              status: 'finished',
-              isGameActive: false
-            });
-          } catch (e) {
-            console.error("Erreur fin de partie Firestore:", e);
-          }
+            console.log("🔍 [REVEAL] I am HOST. Scheduling forced next-round in 10s.");
+
+            nextRoundTimer.current = setTimeout(() => {
+
+              console.log("🔍 [REVEAL] ⏰ Time's up! Forcing next round.");
+
+              handleNext(true); // Force execute
+
+            }, 10000);
+
+        } else {
+
+            console.log("🔍 [REVEAL] I am GUEST. Waiting for Host or Unanimity.");
+
         }
 
-        const results = players.map(p => ({
-          name: p.name,
-          score: playerScores[p.id] || 0,
-          avatar: {
-            color: p.color,
-            emoji: p.emoji,
-            image: p.image
-          }
-        })).sort((a, b) => b.score - a.score);
+    
 
-        navigation.replace('GameOver', { results });
-    } else {
-        navigation.replace('Game', {
-          round: round + 1,
-          playerScores,
-          category,
-          maxRounds
-        });
-    }
-  };
+        return () => {
 
-  const coverRotate = anims.coverRotate.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['-15deg', '0deg'],
-  });
+          if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
 
-  return (
-    <SafeContainer>
-      {isGuessCorrect && <Confetti />}
-      <Animated.View style={[styles.container, { opacity: anims.bgFade }]}>
+          if (countdownInterval.current) clearInterval(countdownInterval.current);
 
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
-            <Ionicons name="close" size={24} color="#FF6B6B" />
-          </TouchableOpacity>
-          <Text style={styles.roundTitle}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
-          <View style={{ width: 40 }} />
-        </View>
+          SoundManager.stopSound();
 
-        {bannerVisible && (
-          <Animated.View
-            {...panResponder.panHandlers}
-            style={[
-              styles.resultBannerPopup,
-              {
-                opacity: anims.bannerFade,
-                transform: [{ translateY: anims.bannerY }]
-              }
-            ]}
-          >
-            <LinearGradient
-              colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
-              style={styles.resultBanner}
-            >
-              <View style={styles.bannerIconContainer}>
-                <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
-              </View>
-              <View style={styles.bannerTextContainer}>
-                <Text style={styles.resultBannerText}>{isGuessCorrect ? t('bravo') : (selectedPlayer ? t('missed') : t('timeout'))}</Text>
-                {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} {t('points_short')}</Text>}
-              </View>
-            </LinearGradient>
-          </Animated.View>
-        )}
+        };
 
-        <View style={styles.content}>
-          <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
-            {safeTrack.albumImage ? (
-                <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
-            ) : (
-                <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Ionicons name="musical-notes" size={60} color="#666" />
-                </View>
-            )}
-            <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
-          </Animated.View>
+      }, []);
 
-          <Animated.View style={[styles.trackInfo, { opacity: anims.infoFade }]}>
-            <Text style={styles.trackTitle} numberOfLines={1}>{safeTrack.title}</Text>
-            <Text style={styles.trackArtist}>{safeTrack.artist}</Text>
-            <View style={styles.ownerInfo}>
-              <Text style={styles.ownerText}>{t('it_was')} </Text>
-              {correctPlayerObj?.image ? (
-                <Image source={{ uri: correctPlayerObj.image }} style={styles.ownerAvatar} />
-              ) : (
-                <View style={[styles.ownerAvatar, { backgroundColor: correctPlayerObj?.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
-                    <Text style={{ fontSize: 10 }}>{correctPlayerObj?.emoji || '👤'}</Text>
-                </View>
-              )}
-              <Text style={styles.ownerName}>{correctPlayerObj?.name}</Text>
+    
+
+      // force=true means Timer expired
+
+      const handleNext = async (force: boolean = false) => {
+
+        console.log(`🔍 [REVEAL] handleNext triggered! (Force: ${force})`);
+
+        
+
+        // Clear intervals if we are moving
+
+        if (force || round >= maxRounds) {
+
+            if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+
+            if (countdownInterval.current) clearInterval(countdownInterval.current);
+
+        }
+
+    
+
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+
+        
+
+        // FIN DU JEU (Seul l'hôte décide, ou tout le monde clique et l'hôte relaie)
+
+        if (round >= maxRounds) {
+
+             if (!isHost) {
+
+                showToast(t('waiting_host'), "info");
+
+                return;
+
+             }
+
+             
+
+             console.log("🔍 [REVEAL] Game Finished. Updating Firestore status -> finished");
+
+             if (activeGameDocId) {
+
+                await updateDoc(doc(db, 'games', activeGameDocId), {
+
+                  status: 'finished',
+
+                  isGameActive: false
+
+                });
+
+             }
+
+             const results = players.map(p => ({
+
+                name: p.name,
+
+                score: playerScores[p.id] || 0,
+
+                avatar: { color: p.color, emoji: p.emoji, image: p.image }
+
+             })).sort((a, b) => b.score - a.score);
+
+             navigation.replace('GameOver', { results });
+
+             return;
+
+        }
+
+    
+
+        // ROUND SUIVANT
+
+        if (force) {
+
+            // Le timer a expiré, l'hôte FORCE le passage
+
+            if (isHost && nextRound) {
+
+                console.log("🔍 [REVEAL] ⏰ Forced Next Round.");
+
+                nextRound();
+
+            }
+
+        } else {
+
+            // Clic manuel -> On se met "Prêt"
+
+            console.log("🔍 [REVEAL] Marking myself as ready.");
+
+            setIsReady(true);
+
+            if (markPlayerReady) markPlayerReady();
+
+        }
+
+      };
+
+      
+
+      // Wrapper for manual button press
+
+      const handleNextAction = () => {
+
+          if (isReady) return; // Prevent double click
+
+          console.log(`🔍 [REVEAL] Manual 'Next' button pressed.`);
+
+          handleNext(false);
+
+      };
+
+    
+
+      const coverRotate = anims.coverRotate.interpolate({
+
+        inputRange: [0, 1],
+
+        outputRange: ['-15deg', '0deg'],
+
+      });
+
+    
+
+      const getButtonText = () => {
+
+          if (round >= maxRounds) return t('show_results');
+
+          if (isReady) return `${t('waiting_others')} (${readyPlayers?.length || 0}/${players.length})`;
+
+          return `${t('next_round')} (${autoNextTime}s)`;
+
+      };
+
+    
+
+      return (
+
+        <SafeContainer>
+
+          {isGuessCorrect && <Confetti />}
+
+          <Animated.View style={[styles.container, { opacity: anims.bgFade }]}>
+
+    
+
+            <View style={styles.header}>
+
+              <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+
+                <Ionicons name="close" size={24} color="#FF6B6B" />
+
+              </TouchableOpacity>
+
+              <Text style={styles.roundTitle}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
+
+              <View style={{ width: 40 }} />
+
             </View>
-          </Animated.View>
-        </View>
 
-          <View style={styles.scoreboardWrapper}>
-            <Text style={styles.scoreboardTitle}>{t('results')}</Text>
-            <ScrollView
-              style={styles.scoreboardScroll}
-              showsVerticalScrollIndicator={false}
-              contentContainerStyle={styles.scoreboardContent}
-            >
-              {[...players]
-                .sort((a, b) => (playerScores[b.id] || 0) - (playerScores[a.id] || 0))
-                .map((player, index) => {
-                  const currentPScore = playerScores[player.id] || 0;
-                  const prevPScore = previousScores[player.id] || 0;
-                  const hasGainedPoints = currentPScore > prevPScore;
+    
 
-                  return (
-                    <View key={player.id} style={[styles.scoreRow, hasGainedPoints ? styles.scoreRowCorrect : styles.scoreRowIncorrect]}>
-                      <View style={styles.scorePlayerInfo}>
-                        <Text style={styles.rankNumber}>#{index + 1}</Text>
-                        {!!player.image ? (<Image source={{ uri: player.image }} style={styles.scoreAvatar} />) : (<View style={[styles.scoreAvatar, { backgroundColor: player.color }]}><Text style={{ fontSize: 14 }}>{player.emoji}</Text></View>)}
-                        <Text style={styles.scorePlayerName} numberOfLines={1}>{player.name}</Text>
-                      </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <Text style={styles.scoreTotal}>{currentPScore} {t('points_short')}</Text>
-                        {hasGainedPoints ? (<Text style={styles.pointsGainedText}>+{currentPScore - prevPScore}</Text>) : null}
-                      </View>
+            {bannerVisible && (
+
+              <Animated.View
+
+                {...panResponder.panHandlers}
+
+                style={[
+
+                  styles.resultBannerPopup,
+
+                  {
+
+                    opacity: anims.bannerFade,
+
+                    transform: [{ translateY: anims.bannerY }]
+
+                  }
+
+                ]}
+
+              >
+
+                <LinearGradient
+
+                  colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
+
+                  style={styles.resultBanner}
+
+                >
+
+                  <View style={styles.bannerIconContainer}>
+
+                    <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
+
+                  </View>
+
+                  <View style={styles.bannerTextContainer}>
+
+                    <Text style={styles.resultBannerText}>{isGuessCorrect ? t('bravo') : (selectedPlayer ? t('missed') : t('timeout'))}</Text>
+
+                    {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} {t('points_short')}</Text>}
+
+                  </View>
+
+                </LinearGradient>
+
+              </Animated.View>
+
+            )}
+
+    
+
+            <View style={styles.content}>
+
+              <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
+
+                {safeTrack.albumImage ? (
+
+                    <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
+
+                ) : (
+
+                    <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+
+                        <Ionicons name="musical-notes" size={60} color="#666" />
+
                     </View>
-                  );
-                })}
-            </ScrollView>
-          </View>
 
-        <Animated.View style={[styles.footer, { opacity: anims.buttonFade }]}>
-          <PressableCard onPress={handleNext} style={{ width: '100%' }}>
-            <LinearGradient colors={[COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]} start={{x:0, y:0}} end={{x:1, y:0}} style={styles.nextButton}>
-              <Text style={styles.nextButtonText}>
-                {round >= maxRounds ? t('show_results') : `${t('next_round')} (${autoNextTime}s)`}
-              </Text>
-              <Ionicons name={round >= maxRounds ? "stats-chart" : "arrow-forward"} color="white" size={24} />
-            </LinearGradient>
-          </PressableCard>
-        </Animated.View>
-      </Animated.View>
-    </SafeContainer>
-  );
-}
+                )}
 
-const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'space-between' },
-  header: {
+                <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
+
+              </Animated.View>
+
+    
+
+              <Animated.View style={[styles.trackInfo, { opacity: anims.infoFade }]}>
+
+                <Text style={styles.trackTitle} numberOfLines={1}>{safeTrack.title}</Text>
+
+                <Text style={styles.trackArtist}>{safeTrack.artist}</Text>
+
+                <View style={styles.ownerInfo}>
+
+                  <Text style={styles.ownerText}>{t('it_was')} </Text>
+
+                  {correctPlayerObj?.image ? (
+
+                    <Image source={{ uri: correctPlayerObj.image }} style={styles.ownerAvatar} />
+
+                  ) : (
+
+                    <View style={[styles.ownerAvatar, { backgroundColor: correctPlayerObj?.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
+
+                        <Text style={{ fontSize: 10 }}>{correctPlayerObj?.emoji || '👤'}</Text>
+
+                    </View>
+
+                  )}
+
+                  <Text style={styles.ownerName}>{correctPlayerObj?.name}</Text>
+
+                </View>
+
+              </Animated.View>
+
+            </View>
+
+    
+
+              <View style={styles.scoreboardWrapper}>
+
+                <Text style={styles.scoreboardTitle}>{t('results')}</Text>
+
+                <ScrollView
+
+                  style={styles.scoreboardScroll}
+
+                  showsVerticalScrollIndicator={false}
+
+                  contentContainerStyle={styles.scoreboardContent}
+
+                >
+
+                  {[...players]
+
+                    .sort((a, b) => (playerScores[b.id] || 0) - (playerScores[a.id] || 0))
+
+                    .map((player, index) => {
+
+                      const currentPScore = playerScores[player.id] || 0;
+
+                      const prevPScore = previousScores[player.id] || 0;
+
+                      const hasGainedPoints = currentPScore > prevPScore;
+
+    
+
+                      return (
+
+                        <View key={player.id} style={[styles.scoreRow, hasGainedPoints ? styles.scoreRowCorrect : styles.scoreRowIncorrect]}>
+
+                          <View style={styles.scorePlayerInfo}>
+
+                            <Text style={styles.rankNumber}>#{index + 1}</Text>
+
+                            {!!player.image ? (<Image source={{ uri: player.image }} style={styles.scoreAvatar} />) : (<View style={[styles.scoreAvatar, { backgroundColor: player.color }]}><Text style={{ fontSize: 14 }}>{player.emoji}</Text></View>)}
+
+                            <Text style={styles.scorePlayerName} numberOfLines={1}>{player.name}</Text>
+
+                          </View>
+
+                          <View style={{ alignItems: 'flex-end' }}>
+
+                            <Text style={styles.scoreTotal}>{currentPScore} {t('points_short')}</Text>
+
+                            {hasGainedPoints ? (<Text style={styles.pointsGainedText}>+{currentPScore - prevPScore}</Text>) : null}
+
+                          </View>
+
+                        </View>
+
+                      );
+
+                    })}
+
+                </ScrollView>
+
+              </View>
+
+    
+
+            <Animated.View style={[styles.footer, { opacity: anims.buttonFade }]}>
+
+              <PressableCard onPress={handleNextAction} style={{ width: '100%' }}>
+
+                <LinearGradient 
+
+                    colors={isReady ? ['#444', '#555'] : [COLORS.SPOTIFY_GREEN, COLORS.SPOTIFY_GREEN_LIGHT]} 
+
+                    start={{x:0, y:0}} end={{x:1, y:0}} 
+
+                    style={styles.nextButton}
+
+                >
+
+                  <Text style={[styles.nextButtonText, isReady && { color: '#AAA' }]}>
+
+                    {getButtonText()}
+
+                  </Text>
+
+                  {!isReady && <Ionicons name={round >= maxRounds ? "stats-chart" : "arrow-forward"} color="white" size={24} />}
+
+                  {isReady && <ActivityIndicator size="small" color="#AAA" />}
+
+                </LinearGradient>
+
+              </PressableCard>
+
+            </Animated.View>
+
+          </Animated.View>
+
+        </SafeContainer>
+
+      );
+
+    }
+
+    
+
+    const styles = StyleSheet.create({
+
+      container: { flex: 1, justifyContent: 'space-between' },
+
+      header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
