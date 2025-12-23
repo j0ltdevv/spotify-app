@@ -120,41 +120,6 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
     // Keep app alive in background
     SoundManager.playSilence();
 
-    // SUCCESS LOGS START
-    let logCount = 0;
-    const successLogs = [
-        "Connection established ✅",
-        "Database synced successfully [OK]",
-        "User authenticated [VALID]",
-        "Token refreshed [200 OK]",
-        "Assets loaded [100%]",
-        "Latency: 1ms [PERFECT]",
-        "Audio buffer optimized [DONE]",
-        "Security handshake [ACCEPTED]",
-        "Playlist generated [SUCCESS]",
-        "User profile verified ✅",
-        "Network stability: ULTRA",
-        "Encryption key: MATCH",
-        "System status: OPERATIONAL",
-        "Frame rate: 120FPS",
-        "Memory integrity: 100%",
-        "Packets delivered: 0 loss",
-        "Server response: 2ms",
-        "Cache cleared [CLEAN]",
-        "Background process: ACTIVE",
-        "Access Granted 🚀"
-    ];
-    
-    const interval = setInterval(() => {
-        const msg = successLogs[Math.floor(Math.random() * successLogs.length)];
-        const id = Math.floor(Math.random() * 999999);
-        console.log(`[SUCCESS_MATRIX] <${id}> ${msg}`);
-        logCount++;
-        // Continues for a long time (effectively "until controlled" by app navigation or reload)
-        if (logCount > 5000) clearInterval(interval); 
-    }, 10); // Ultra fast
-    // SUCCESS LOGS END
-    
     try {
       setIsStarting(true);
       
