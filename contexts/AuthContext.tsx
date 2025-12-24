@@ -140,40 +140,29 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (savedToken && savedExpiry) {
         const expiryTime = parseInt(savedExpiry, 10);
 
-        // 1. Check if the token has NOT expired
+        // ✅ STRATÉGIE "CONFIANCE D'ABORD"
+        // 1. Si le token n'a pas expiré localement, on l'utilise.
         if (!isTokenExpired(expiryTime)) {
-          // Double check with Spotify API
-          const isValid = await validateToken(savedToken);
-          
-          if (isValid) {
-            console.log('✅ Token valide trouvé, reconnexion automatique');
+            console.log('✅ Token local valide trouvé, connexion optimiste.');
             setAccessToken(savedToken);
             setTokenExpiry(expiryTime);
-          } else {
-            console.log('⚠️ Token invalide côté API, tentative de refresh...');
-            // Try refresh if API says invalid (revoked?)
+            // La validation en arrière-plan (via checkTokenValidity) se chargera du reste.
+        } else {
+            // 2. Si expiré, on tente de rafraîchir SANS bloquer.
+            console.log('⚠️ Token local expiré, tentative de refresh en arrière-plan...');
             const refreshSuccess = await refreshSpotifyToken();
             if (!refreshSuccess) {
-                await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
+                console.log('❌ Impossible de rafraîchir, l\'utilisateur devra se reconnecter manuellement.');
+                // On n'efface plus les tokens ici pour permettre une nouvelle tentative plus tard.
             }
-          }
-        } else {
-          console.log('⚠️ Token expiré, tentative de refresh...');
-          // 2. Token expired -> Try Refresh
-          const refreshSuccess = await refreshSpotifyToken();
-          if (!refreshSuccess) {
-             console.log('❌ Impossible de rafraîchir, nettoyage...');
-             await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
-          }
         }
       } else {
-        console.log('ℹ️ Aucun token sauvegardé');
+        console.log('ℹ️ Aucun token sauvegardé, attente de connexion manuelle.');
       }
     } catch (error) {
       console.error('❌ Erreur lors du chargement du token:', error);
-      await AsyncStorage.multiRemove([STORAGE_KEYS.SPOTIFY_TOKEN, STORAGE_KEYS.SPOTIFY_TOKEN_EXPIRY, STORAGE_KEYS.SPOTIFY_REFRESH_TOKEN]);
     } finally {
-      // setIsLoading(false); // Auth state listener will handle isLoading
+      // Le isLoading est géré par le onAuthStateChanged de Firebase.
     }
   };
 

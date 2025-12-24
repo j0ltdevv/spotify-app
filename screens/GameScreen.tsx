@@ -71,6 +71,7 @@ export default function GameScreen(props: {
   const [screenStatus, setScreenStatus] = useState< 'PREPARING_ROUND' | 'PLAYING' | 'VOTED'>('PREPARING_ROUND');
   
   const roundLock = useRef(0);
+  const streakRef = useRef(0); // 🔥 New Streak Tracker
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const anims = { loadingIcon: useRef(new Animated.Value(1)).current };
 
@@ -335,6 +336,7 @@ export default function GameScreen(props: {
     console.log(`🎮 [GameScreen] Vote action for player: ${playerId}`);
     if (screenStatus !== 'PLAYING' || hasVoted) return;
     
+    SoundManager.playSFX('CLICK'); // 🔊 Add click sound
     setScreenStatus('VOTED');
     setHasVoted(true); 
     setSelectedPlayer(playerId);
@@ -346,17 +348,29 @@ export default function GameScreen(props: {
     const track = currentTrackRef.current;
     
     const isCorrect = track?.correctPlayer === playerId;
-    const score = isCorrect ? 500 + (timeLeft * 30) : 0;
+    
+    // 🔥 Streak Logic
+    let streakBonus = 0;
+    if (isCorrect) {
+        streakRef.current += 1;
+        if (streakRef.current >= 3) {
+            streakBonus = 100;
+            console.log("🔥 STREAK BONUS APPLIED!");
+        }
+    } else {
+        streakRef.current = 0;
+    }
+
+    const score = isCorrect ? 500 + (timeLeft * 30) + streakBonus : 0;
     const myPlayerId = firebaseUser?.uid;
+    const updatedScores = { ...playerScores };
     
     setLocalScore(score); 
 
     if (myPlayerId) {
       if (score > 0) {
-        setPlayerScores(prev => ({
-            ...prev,
-            [myPlayerId]: (prev[myPlayerId] || 0) + score
-        }));
+        updatedScores[myPlayerId] = (updatedScores[myPlayerId] || 0) + score;
+        setPlayerScores(updatedScores);
         if (updatePlayerScore) updatePlayerScore(myPlayerId, score);
       }
       registerVote(myPlayerId);
@@ -366,9 +380,10 @@ export default function GameScreen(props: {
         correctPlayer: players.find(p => p.id === track?.correctPlayer)?.name || '?',
         track: track,
         score, round, 
-        playerScores: newScores, 
+        playerScores: updatedScores, 
         previousScores: playerScores,
-        selectedPlayer: playerId, category, maxRounds 
+        selectedPlayer: playerId, category, maxRounds,
+        streak: streakRef.current // Pass streak to show visual
     });
   };
 

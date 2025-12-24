@@ -3,7 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useGame } from '../contexts/GameContext';
 import { useToast } from '../contexts/ToastContext';
 import { useSettings } from '../contexts/SettingsContext';
-import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Animated, Dimensions, Image, Alert, ScrollView, PanResponder, ActivityIndicator, Share } from 'react-native'; // Add Share
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RouteProp } from '@react-navigation/native';
 import { RootStackParamList } from '../App';
@@ -33,14 +33,35 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
   const {
     correctPlayer, track, score = 0, round,
     playerScores = {}, previousScores = {},
-    selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS
+    selectedPlayer, category, maxRounds = GAME_CONFIG.MAX_ROUNDS,
+    streak = 0 // 🔥 Streak param
   } = route.params;
   const { players, leaveGame, isHost, activeGameDocId, currentRound, status: gameStatus, nextRound, markPlayerReady, readyPlayers } = useGame();
-  const { firebaseUser } = useAuth();
+  const { firebaseUser, accessToken } = useAuth();
   const { showToast } = useToast();
   const { t } = useSettings();
 
   const [isReady, setIsReady] = useState(false); // Local UI state
+  const [isLiked, setIsLiked] = useState(false);
+  const [isLiking, setIsReconnecting] = useState(false); // Reuse name or change, let's use isLiking
+
+  const handleLikeTrack = async () => {
+    if (!accessToken || !safeTrack.id || isLiked) return;
+    
+    try {
+      setIsReconnecting(true); // isLiking
+      const success = await MusicService.addTrackToLiked(safeTrack.id, accessToken);
+      if (success) {
+        setIsLiked(true);
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        showToast(t('added_to_favorites') || "Ajouté aux favoris !", "success");
+      }
+    } catch (error) {
+      showToast(t('error_adding_favorites') || "Erreur lors de l'ajout", "error");
+    } finally {
+      setIsReconnecting(false);
+    }
+  };
 
   console.log(`🔍 [REVEAL] Screen MOUNTED/RENDERED. 
   > Round: ${round} 
@@ -65,7 +86,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
         navigation.replace('Game', {
             round: currentRound,
-            playerScores,
+            playerScores: playerScores, // Passes the scores received from previous Reveal/Game
             category,
             maxRounds
         });
@@ -87,7 +108,17 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     buttonFade: new Animated.Value(0),
     bannerFade: new Animated.Value(0),
     bannerY: new Animated.Value(-100),
+    blurRadius: new Animated.Value(15), // 🌫️ Blur Effect
   });
+
+  const handleShare = async () => {
+    try {
+        const message = `🎵 Track Roulette - Round ${round}\nScore: ${score} pts ${streak >= 3 ? '🔥' : ''}\nTop: ${players[0]?.name || '?'}`;
+        await Share.share({ message });
+    } catch (error) {
+        console.log(error);
+    }
+  };
   const [showConfetti, setShowConfetti] = useState(isGuessCorrect);
   const [autoNextTime, setAutoNextTime] = useState(8);
   const [bannerVisible, setBannerVisible] = useState(true);
@@ -150,8 +181,10 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
     if (isGuessCorrect) {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      SoundManager.playSFX('SUCCESS'); // 🔊 Victory sound!
     } else {
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      SoundManager.playSFX('ERROR'); // 🔊 Failure sound
     }
 
     Animated.sequence([
@@ -159,6 +192,8 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       Animated.parallel([
         Animated.spring(anims.coverScale, { toValue: 1, tension: 40, friction: 7, useNativeDriver: true }),
         Animated.timing(anims.coverRotate, { toValue: 1, duration: 500, useNativeDriver: true }),
+        // 🌫️ Reveal Blur
+        Animated.timing(anims.blurRadius, { toValue: 0, duration: 1500, delay: 500, useNativeDriver: false }), // Native driver false for blurRadius
       ]),
       Animated.timing(anims.infoFade, { toValue: 1, duration: 500, useNativeDriver: true }),
       Animated.timing(anims.buttonFade, { toValue: 1, duration: 500, useNativeDriver: true }),
@@ -369,23 +404,51 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
     
 
-            <View style={styles.header}>
-
-              <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
-
-                <Ionicons name="close" size={24} color="#FF6B6B" />
-
-              </TouchableOpacity>
-
-              <Text style={styles.roundTitle}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
-
-              <View style={{ width: 40 }} />
-
-            </View>
+                    <View style={styles.header}>
 
     
 
-            {bannerVisible && (
+                      <TouchableOpacity style={styles.quitButton} onPress={handleQuit}>
+
+    
+
+                        <Ionicons name="close" size={24} color="#FF6B6B" />
+
+    
+
+                      </TouchableOpacity>
+
+    
+
+                      <Text style={styles.roundTitle}>{t('round_x_of_y').replace('{0}', String(round)).replace('{1}', String(maxRounds))}</Text>
+
+    
+
+                      
+
+    
+
+                      <TouchableOpacity style={styles.shareButton} onPress={handleShare}>
+
+    
+
+                        <Ionicons name="share-outline" size={20} color="white" />
+
+    
+
+                      </TouchableOpacity>
+
+    
+
+                    </View>
+
+    
+
+            
+
+    
+
+                    {bannerVisible && (
 
               <Animated.View
 
@@ -407,57 +470,103 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
 
               >
 
-                <LinearGradient
+                            <LinearGradient
 
-                  colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
+                              colors={isGuessCorrect ? ['#1DB954', '#178F43'] : ['#FF6B6B', '#D64545']}
 
-                  style={styles.resultBanner}
+                              style={styles.resultBanner}
 
-                >
+                            >
 
-                  <View style={styles.bannerIconContainer}>
+                              <View style={styles.bannerIconContainer}>
 
-                    <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
+                                <Ionicons name={isGuessCorrect ? "checkmark-circle" : "close-circle"} size={36} color="white" />
 
-                  </View>
+                              </View>
 
-                  <View style={styles.bannerTextContainer}>
+                              <View style={styles.bannerTextContainer}>
 
-                    <Text style={styles.resultBannerText}>{isGuessCorrect ? t('bravo') : (selectedPlayer ? t('missed') : t('timeout'))}</Text>
+                                <Text style={styles.resultBannerText}>{isGuessCorrect ? t('bravo') : (selectedPlayer ? t('missed') : t('timeout'))}</Text>
 
-                    {isGuessCorrect && <Text style={styles.scoreGained}>+{Math.floor(score)} {t('points_short')}</Text>}
+                                {isGuessCorrect && (
 
-                  </View>
+                                    <View style={{flexDirection: 'row', alignItems: 'center'}}>
 
-                </LinearGradient>
+                                        <Text style={styles.scoreGained}>+{Math.floor(score)} {t('points_short')}</Text>
 
-              </Animated.View>
+                                        {streak >= 3 && <Text style={{marginLeft: 5, fontSize: 16}}>🔥 x{streak}</Text>}
 
-            )}
+                                    </View>
 
-    
+                                )}
 
-            <View style={styles.content}>
+                              </View>
 
-              <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
+                            </LinearGradient>
 
-                {safeTrack.albumImage ? (
+                          </Animated.View>
 
-                    <Image source={{ uri: safeTrack.albumImage }} style={styles.coverImage} />
+                        )}
 
-                ) : (
+                
 
-                    <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+                        <View style={styles.content}>
 
-                        <Ionicons name="musical-notes" size={60} color="#666" />
+                          <Animated.View style={{ transform: [{ scale: anims.coverScale }, { rotate: coverRotate }] }}>
 
-                    </View>
+                            {safeTrack.albumImage ? (
 
-                )}
+                                <Animated.Image 
 
-                <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
+                                    source={{ uri: safeTrack.albumImage }} 
 
-              </Animated.View>
+                                    style={[styles.coverImage, { blurRadius: anims.blurRadius }]} 
+
+                                />
+
+                            ) : (
+
+                              <View style={[styles.coverImage, { backgroundColor: '#333', justifyContent: 'center', alignItems: 'center' }]}>
+
+                                  <Ionicons name="musical-notes" size={60} color="#666" />
+
+                              </View>
+
+                          )}
+
+                          <View style={[styles.glow, isGuessCorrect ? styles.glowCorrect : styles.glowIncorrect]} />
+
+                          
+
+                          {/* ❤️ LIKE BUTTON (Spotify Only for now) */}
+
+                          {safeTrack.source !== 'Deezer' && !!accessToken && (
+
+                              <TouchableOpacity 
+
+                                  style={[styles.likeButton, isLiked && styles.likeButtonActive]} 
+
+                                  onPress={handleLikeTrack}
+
+                                  activeOpacity={0.7}
+
+                              >
+
+                                  <Ionicons 
+
+                                      name={isLiked ? "heart" : "heart-outline"} 
+
+                                      size={24} 
+
+                                      color={isLiked ? "white" : COLORS.SPOTIFY_GREEN} 
+
+                                  />
+
+                              </TouchableOpacity>
+
+                          )}
+
+                        </Animated.View>
 
     
 
@@ -619,6 +728,16 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     borderWidth: 1,
     borderColor: 'rgba(255, 107, 107, 0.2)',
   },
+  shareButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
   roundTitle: {
     color: '#B3B3B3',
     fontSize: 12,
@@ -702,6 +821,28 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.5,
     shadowRadius: 12,
+  },
+  likeButton: {
+    position: 'absolute',
+    bottom: -15,
+    right: -15,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.SPOTIFY_GREEN,
+    shadowColor: COLORS.SPOTIFY_GREEN,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  likeButtonActive: {
+    backgroundColor: COLORS.SPOTIFY_GREEN,
+    borderColor: 'white',
   },
   trackInfo: {
     alignItems: 'center',

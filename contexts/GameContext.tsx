@@ -1,11 +1,14 @@
 import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
 import { doc, onSnapshot, setDoc, query, collection, where, getDocs, updateDoc, arrayUnion, deleteDoc, arrayRemove, getDoc, serverTimestamp } from 'firebase/firestore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { db } from '../services/FirebaseService';
 import { useAuth } from './AuthContext';
 import UserService from '../services/UserService';
 import MusicService from '../services/MusicService';
 import { getBestImage, getRandomColor, getRandomEmoji } from '../utils/userUtils';
 import { GameTrack, PlayerScores, Player, SpotifyTrack } from '../types';
+
+const LAST_GAME_ID_KEY = 'last_active_game_id';
 
 interface GameState {
   currentRound: number;
@@ -41,12 +44,15 @@ interface GameContextType extends GameState {
   addPlayedTrack: (trackId: string) => void;
   setGameTrack: (track: GameTrack | null) => void;
   setGamePlaylist: (playlist: GameTrack[]) => void;
+  setGameCategory: (category: string) => Promise<void>;
   addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>;
   addBot: () => Promise<void>;
   resetGame: () => Promise<void>;
   createGame: () => Promise<string>;
   joinGame: (code: string) => Promise<boolean>;
+  tryRejoinLastGame: () => Promise<boolean>;
   leaveGame: () => Promise<void>;
+  kickPlayer: (playerId: string) => Promise<void>;
   isHost: boolean;
   activeGameDocId: string | null;
 }
@@ -82,6 +88,17 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   // Optimistic local storage for played tracks to avoid latency issues
   const [localPlayedTracks, setLocalPlayedTracks] = useState<Set<string>>(new Set());
+
+  // --- 💾 RECONNECTION LOGIC: Save/Clear last active game ---
+  useEffect(() => {
+    if (activeGameDocId) {
+        console.log(`💾 [RECONNECT] Saving last game ID: ${activeGameDocId}`);
+        AsyncStorage.setItem(LAST_GAME_ID_KEY, activeGameDocId);
+    } else {
+        console.log(`💾 [RECONNECT] Clearing last game ID.`);
+        AsyncStorage.removeItem(LAST_GAME_ID_KEY);
+    }
+  }, [activeGameDocId]);
 
   useEffect(() => {
     let unsubscribe: () => void;
@@ -217,6 +234,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const gameData = gameDoc.data() as GameState;
     const hostUid = gameDoc.id;
 
+    // IMPORTANT FOR RECONNECT: We don't re-add the player if they're already in the list.
     if (!gameData.players.some(p => p.id === firebaseUser.uid)) {
       const userProfile = accessToken ? await UserService.fetchUserProfile(accessToken, firebaseUser.uid) : null;
       const newPlayer: Player = {
@@ -236,6 +254,46 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return true;
   };
 
+  const tryRejoinLastGame = async (): Promise<boolean> => {
+    console.log("💾 [RECONNECT] Trying to rejoin last game...");
+    const lastGameId = await AsyncStorage.getItem(LAST_GAME_ID_KEY);
+    if (!lastGameId) {
+      console.log("💾 [RECONNECT] No last game ID found.");
+      return false;
+    }
+
+    const gameDocRef = doc(db, 'games', lastGameId);
+    const gameDocSnap = await getDoc(gameDocRef);
+
+    if (gameDocSnap.exists()) {
+      console.log("💾 [RECONNECT] ✅ Game still exists! Re-joining...");
+      setActiveGameDocId(lastGameId);
+      return true;
+    } else {
+      console.log("💾 [RECONNECT] ❌ Game does not exist anymore. Clearing stored ID.");
+      await AsyncStorage.removeItem(LAST_GAME_ID_KEY);
+      return false;
+    }
+  };
+
+  const kickPlayer = async (playerId: string) => {
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    const playerToRemove = gameState.players.find(p => p.id === playerId);
+    if (!playerToRemove) return;
+
+    console.log(`🔥 [GameContext] Kicking player: ${playerId}`);
+    try {
+        await updateDoc(doc(db, 'games', activeGameDocId), {
+            players: arrayRemove(playerToRemove),
+            // Remove traces to clean up
+            votes: arrayRemove(playerId),
+            readyPlayers: arrayRemove(playerId)
+        });
+    } catch(e) {
+        console.error("Error kicking player:", e);
+    }
+  };
+
   const leaveGame = async () => {
     console.log("🔥 [GameContext] Leaving game...");
     if (!firebaseUser || !activeGameDocId) return;
@@ -246,9 +304,11 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       } else {
         const playerToRemove = gameState.players.find(p => p.id === firebaseUser.uid);
         if (playerToRemove) {
-          console.log("🔥 [GameContext] Player leaving -> Removing from player list.");
+          console.log("🔥 [GameContext] Player leaving -> Removing from player list, votes and ready status.");
           await updateDoc(doc(db, 'games', activeGameDocId), {
-            players: arrayRemove(playerToRemove)
+            players: arrayRemove(playerToRemove),
+            votes: arrayRemove(firebaseUser.uid),       // Remove their vote if any
+            readyPlayers: arrayRemove(firebaseUser.uid) // Remove their ready status if any
           });
         }
       }
@@ -384,6 +444,19 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     updateDoc(doc(db, 'games', activeGameDocId), { playlist });
   };
 
+  const setGameCategory = async (category: string) => {
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] Updating game category to: ${category}`);
+    
+    // Changing category resets the pool and setup status to allow everyone to contribute new tracks
+    await updateDoc(doc(db, 'games', activeGameDocId), { 
+        category,
+        trackPool: [], 
+        "setup.tracksPrepared": false,
+        status: 'waiting'
+    });
+  };
+
   const addToTrackPool = async (tracks: SpotifyTrack[]) => {
     if (!activeGameDocId) throw new Error("Game document not active");
     const cleanTracks = tracks.slice(0, 50).map(t => JSON.parse(JSON.stringify(t)));
@@ -429,12 +502,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     addPlayedTrack,
     setGameTrack,
     setGamePlaylist,
+    setGameCategory,
     addToTrackPool,
     addBot,
     resetGame,
     createGame,
     joinGame,
+    tryRejoinLastGame,
     leaveGame,
+    kickPlayer,
     isHost: firebaseUser?.uid === gameState.hostId,
     activeGameDocId
   };
