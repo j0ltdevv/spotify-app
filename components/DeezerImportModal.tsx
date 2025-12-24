@@ -57,7 +57,7 @@ const DeezerImportModal: React.FC<DeezerImportModalProps> = ({ visible, onClose,
   // --- Logic 3. Normalisation (Adapter Pattern) ---
   const normalizeDeezerTrack = (track: DeezerTrack): GameTrack => {
     return {
-      id: track.id.toString(),
+      id: `dz_${track.id}`, // Prefix ID to avoid collisions
       title: track.title,
       artist: track.artist.name,
       album: track.album.title,
@@ -131,10 +131,12 @@ const DeezerImportModal: React.FC<DeezerImportModalProps> = ({ visible, onClose,
 
   const fetchAndStartPlaylist = async (playlistId: string | number) => {
     setLoading(true);
+    console.time('DeezerFetch'); // ⏱️ Start timer
     try {
       // 2. Appelle l'API Playlist
       const response = await fetch(`https://api.deezer.com/playlist/${playlistId}`);
       const data = await response.json();
+      console.timeEnd('DeezerFetch'); // ⏱️ End timer
 
       if (data.tracks && data.tracks.data) {
         // Filtrer les tracks sans preview

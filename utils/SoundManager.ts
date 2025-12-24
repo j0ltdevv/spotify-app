@@ -3,7 +3,48 @@ import { Audio } from "expo-av";
 let sound: Audio.Sound | null = null;
 let currentTrackId: string | null = null;
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+// --- CONSTANTS ---
+const SETTINGS_KEY = '@track_roulette_settings';
+
+const SFX_LIBRARY = {
+  SUCCESS: 'https://cdn.pixabay.com/audio/2021/08/04/audio_bbd1303b01.mp3', // Ding
+  ERROR: 'https://cdn.pixabay.com/audio/2022/03/10/audio_c8c8a73053.mp3',   // Buzz
+  CLICK: 'https://cdn.pixabay.com/audio/2022/03/15/audio_7993060d03.mp3',   // Subtle click
+  TRANSITION: 'https://cdn.pixabay.com/audio/2022/01/18/audio_d0a13f69d2.mp3', // Whoosh
+};
+
 const SoundManager = {
+  // ... (keep existing methods)
+  
+  /**
+   * Plays a short sound effect.
+   */
+  async playSFX(type: keyof typeof SFX_LIBRARY) {
+    try {
+      // Check settings directly from storage to avoid context complexity in Singleton
+      const settingsJson = await AsyncStorage.getItem(SETTINGS_KEY);
+      if (settingsJson) {
+        const settings = JSON.parse(settingsJson);
+        if (settings.soundEnabled === false) return;
+      }
+
+      const uri = SFX_LIBRARY[type];
+      const { sound: sfxSound } = await Audio.Sound.createAsync(
+        { uri },
+        { shouldPlay: true, volume: 0.5 }
+      );
+      // SFX should unload themselves after playing to avoid leaks
+      sfxSound.setOnPlaybackStatusUpdate((status) => {
+        if (status.isLoaded && status.didJustFinish) {
+          sfxSound.unloadAsync();
+        }
+      });
+    } catch (error) {
+      console.warn("🔊 [SoundManager] SFX Error:", error);
+    }
+  },
   /**
    * Initializes the Audio session for the app.
    * This is safe to call multiple times.

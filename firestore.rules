@@ -1,13 +1,38 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Permettre à tout utilisateur connecté (même anonyme) de lire/écrire les parties
-    // C'est nécessaire pour que les invités puissent rejoindre la partie de l'hôte
+    
+    // --- 🎮 RÈGLES DE JEU (Anti-Triche) ---
     match /games/{gameId} {
-      allow read, write: if request.auth != null;
+      // Lecture autorisée à tous les joueurs connectés
+      allow read: if request.auth != null;
+      
+      // Création : Uniquement si l'ID du document est l'ID de l'utilisateur (l'hôte)
+      allow create: if request.auth != null && request.resource.id == request.auth.uid;
+      
+      // Suppression : Uniquement par l'Hôte
+      allow delete: if request.auth != null && request.auth.uid == gameId;
+      
+      // Mise à jour : Règles granulaires
+      allow update: if request.auth != null && (
+        // Cas 1 : L'Hôte a tous les droits
+        request.auth.uid == gameId ||
+        
+        // Cas 2 : Un invité se modifie lui-même (Rejoindre, Voter, Prêt)
+        (
+          // L'invité ne modifie QUE les listes où il doit figurer
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['players', 'votes', 'readyPlayers', 'playerScores']) &&
+          
+          // Sécurité : Il ne peut pas vider la liste des autres, il ne peut qu'ajouter SON uid
+          (
+            request.resource.data.votes.size() >= resource.data.votes.size() &&
+            request.resource.data.readyPlayers.size() >= resource.data.readyPlayers.size()
+          )
+        )
+      );
     }
-    // Les profils utilisateurs restent privés ou lisibles par tous pour afficher les noms/avatars ?
-    // Pour afficher les avatars des autres joueurs, il faut que 'users' soit lisible.
+
+    // --- 👤 PROFILS UTILISATEURS ---
     match /users/{userId} {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == userId;
