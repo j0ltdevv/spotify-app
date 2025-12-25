@@ -378,7 +378,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     updateDoc(doc(db, 'games', activeGameDocId), updates);
   };
 
-  const nextRound = () => {
+  const nextRound = async () => {
     console.log(`🔍 [CTX] 👉 nextRound CALLED! 
     > IsHost: ${firebaseUser?.uid === gameState.hostId}
     > ActiveDoc: ${activeGameDocId}
@@ -396,14 +396,29 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         return;
     }
 
-    console.log(`🔍 [CTX] ✅ EXECUTING UPDATE: Round ${gameState.currentRound} -> ${gameState.currentRound + 1}, Status -> playing`);
-    
-    updateDoc(doc(db, 'games', activeGameDocId), { 
-        currentRound: gameState.currentRound + 1,
-        votes: [], 
-        readyPlayers: [], // Reset ready players
-        status: 'playing' 
+    console.log(`🔥 [GameContext] MASTER: Launching Round ${gameState.currentRound + 1}`);
+
+    // 1. D'abord on reset tout le monde en "Attente" pour éviter les faux départs
+    await updateDoc(doc(db, 'games', activeGameDocId), {
+        status: 'waiting', // Tout le monde se met en pause
+        currentTrack: null, // On nettoie la musique précédente
+        "setup.tracksPrepared": false // On signale qu'on cherche une nouvelle musique
     });
+
+    // 2. Ensuite on incrémente le round
+    if (gameState.currentRound >= (gameState.players.length * 2)) {
+       await updateDoc(doc(db, 'games', activeGameDocId), { status: 'finished' });
+    } else {
+       // Petit délai pour être sûr que le statut 'waiting' est passé partout
+       setTimeout(async () => {
+           await updateDoc(doc(db, 'games', activeGameDocId), { 
+               currentRound: gameState.currentRound + 1,
+               votes: [], 
+               readyPlayers: [], // Reset ready players
+               status: 'playing' // On relance le statut jeu (le GameScreen s'occupera du "Preparing")
+           });
+       }, 500);
+    }
   };
 
   const updatePlayerScore = (playerId: string, score: number) => {

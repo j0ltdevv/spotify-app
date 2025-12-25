@@ -159,6 +159,23 @@ export default function GameScreen(props: {
     };
   }, [screenStatus, isScreenFocused]);
 
+    // Timeout de sécurité pour l'hôte
+    useEffect(() => {
+        let safetyTimer: NodeJS.Timeout;
+        if (isHost && screenStatus === 'PREPARING_ROUND') {
+            console.log("⏳ [GameScreen] Starting safety timer for PREPARING_ROUND...");
+            safetyTimer = setTimeout(() => {
+                console.warn("⚠️ [GameScreen] Trop long ! On force un retry.");
+                // Logique de retry
+                setScreenStatus('PREPARING_ROUND'); // Reset status visually if needed
+                roundLock.current = 0; // Unlock round to allow reload
+                // Just forcing a re-render/re-effect triggering by navigation replacement is safest
+                navigation.replace('Game', { gameId: Date.now(), round, playerScores, category, maxRounds });
+            }, 15000); // 15 secondes max
+        }
+        return () => clearTimeout(safetyTimer);
+    }, [screenStatus, isHost]);
+
   // --- Core Game Flow ---
 
   useFocusEffect(

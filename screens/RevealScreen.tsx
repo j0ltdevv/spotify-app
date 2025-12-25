@@ -73,7 +73,8 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
   // 🐛 FIX CRITIQUE : Ecouteur passif pour les Invités
   // Si l'hôte force le passage au round suivant, on doit suivre même si on n'a pas cliqué
   useEffect(() => {
-    if (gameStatus === 'playing' && currentRound > round) {
+    // Si le round dans le contexte est plus grand que le round de cet écran
+    if (currentRound > round) {
         console.log(`🔍 [REVEAL] 🚀 DETECTED NEW ROUND FROM CONTEXT! Navigating automatically...
         > My Local Round: ${round}
         > Context Round: ${currentRound}
@@ -91,7 +92,7 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
             maxRounds
         });
     }
-  }, [currentRound, gameStatus, round, navigation]);
+  }, [currentRound, round, navigation]);
 
   const safeTrack: GameTrack = track || { id: '', title: t('unknown_title'), artist: t('unknown_artist'), album: t('unknown_album'), albumImage: '', preview_url: '', correctPlayer: '?' };       
 
@@ -218,157 +219,68 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
       });
     }, 1000);
 
-        // Only set auto timer if HOST. 
+    // 🛑 SUPPRESSION DE L'AUTO-SKIP : On attend l'hôte !
+    // Seul l'hôte a le bouton pour passer.
 
-        // Logic: If everyone is ready before 10s, Context will trigger nextRound.
+    return () => {
+      if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+      if (countdownInterval.current) clearInterval(countdownInterval.current);
+      SoundManager.stopSound();
+    };
+  }, []);
 
-        // If not, this timer will FORCE nextRound.
+  const [isWaitingHost, setIsWaitingHost] = useState(false);
 
-        if (isHost) {
-
-            console.log("🔍 [REVEAL] I am HOST. Scheduling forced next-round in 10s.");
-
-            nextRoundTimer.current = setTimeout(() => {
-
-              console.log("🔍 [REVEAL] ⏰ Time's up! Forcing next round.");
-
-              handleNext(true); // Force execute
-
-            }, 10000);
-
-        } else {
-
-            console.log("🔍 [REVEAL] I am GUEST. Waiting for Host or Unanimity.");
-
-        }
-
+  const handleNext = async () => {
+    console.log(`🔍 [REVEAL] handleNext triggered!`);
     
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-        return () => {
+    if (round >= maxRounds) {
+         if (!isHost) {
+            showToast(t('waiting_host'), "info");
+            return;
+         }
+         
+         console.log("🔍 [REVEAL] Game Finished. Updating Firestore status -> finished");
+         if (activeGameDocId) {
+            await updateDoc(doc(db, 'games', activeGameDocId), {
+              status: 'finished',
+              isGameActive: false
+            });
+         }
+         const results = players.map(p => ({
+            name: p.name,
+            score: playerScores[p.id] || 0,
+            avatar: { color: p.color, emoji: p.emoji, image: p.image }
+         })).sort((a, b) => b.score - a.score);
+         navigation.replace('GameOver', { results });
+         return;
+    }
 
-          if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
+    // LOGIQUE CHANGEMENT DE ROUND
+    if (isHost) {
+        // L'hôte commande le changement pour tout le monde
+        console.log("🔍 [REVEAL] 👑 I am Host -> Launching Next Round.");
+        await nextRound(); 
+    } else {
+        // L'invité attend
+        console.log("🔍 [REVEAL] 👤 I am Guest -> Waiting for Host.");
+        setIsWaitingHost(true);
+        setIsReady(true); // Visuellement "Prêt"
+        // Optionnel : on peut marquer le joueur comme "prêt" dans Firestore si on veut afficher des coches
+        if (markPlayerReady) markPlayerReady();
+    }
+  };
+  
+  // Wrapper for manual button press
+  const handleNextAction = () => {
+      // if (isReady) return; // Allow re-press if needed or disable? Better to disable in UI.
+      if (isWaitingHost && !isHost) return;
 
-          if (countdownInterval.current) clearInterval(countdownInterval.current);
-
-          SoundManager.stopSound();
-
-        };
-
-      }, []);
-
-    
-
-      // force=true means Timer expired
-
-      const handleNext = async (force: boolean = false) => {
-
-        console.log(`🔍 [REVEAL] handleNext triggered! (Force: ${force})`);
-
-        
-
-        // Clear intervals if we are moving
-
-        if (force || round >= maxRounds) {
-
-            if (nextRoundTimer.current) clearTimeout(nextRoundTimer.current);
-
-            if (countdownInterval.current) clearInterval(countdownInterval.current);
-
-        }
-
-    
-
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        
-
-        // FIN DU JEU (Seul l'hôte décide, ou tout le monde clique et l'hôte relaie)
-
-        if (round >= maxRounds) {
-
-             if (!isHost) {
-
-                showToast(t('waiting_host'), "info");
-
-                return;
-
-             }
-
-             
-
-             console.log("🔍 [REVEAL] Game Finished. Updating Firestore status -> finished");
-
-             if (activeGameDocId) {
-
-                await updateDoc(doc(db, 'games', activeGameDocId), {
-
-                  status: 'finished',
-
-                  isGameActive: false
-
-                });
-
-             }
-
-             const results = players.map(p => ({
-
-                name: p.name,
-
-                score: playerScores[p.id] || 0,
-
-                avatar: { color: p.color, emoji: p.emoji, image: p.image }
-
-             })).sort((a, b) => b.score - a.score);
-
-             navigation.replace('GameOver', { results });
-
-             return;
-
-        }
-
-    
-
-        // ROUND SUIVANT
-
-        if (force) {
-
-            // Le timer a expiré, l'hôte FORCE le passage
-
-            if (isHost && nextRound) {
-
-                console.log("🔍 [REVEAL] ⏰ Forced Next Round.");
-
-                nextRound();
-
-            }
-
-        } else {
-
-            // Clic manuel -> On se met "Prêt"
-
-            console.log("🔍 [REVEAL] Marking myself as ready.");
-
-            setIsReady(true);
-
-            if (markPlayerReady) markPlayerReady();
-
-        }
-
-      };
-
-      
-
-      // Wrapper for manual button press
-
-      const handleNextAction = () => {
-
-          if (isReady) return; // Prevent double click
-
-          console.log(`🔍 [REVEAL] Manual 'Next' button pressed.`);
-
-          handleNext(false);
-
-      };
+      console.log(`🔍 [REVEAL] Manual 'Next' button pressed.`);
+      handleNext();
+  };
 
     
 
@@ -383,14 +295,15 @@ export default function RevealScreen({ navigation, route }: RevealScreenProps) {
     
 
       const getButtonText = () => {
-
-          if (round >= maxRounds) return t('show_results');
-
-          if (isReady) return `${t('waiting_others')} (${readyPlayers?.length || 0}/${players.length})`;
-
-          return `${t('next_round')} (${autoNextTime}s)`;
-
-      };
+      if (round >= maxRounds) return t('show_results');
+      if (isWaitingHost) return t('waiting_host') || "En attente de l'hôte..."; // Fallback text
+      if (isReady) return `${t('waiting_others')} (${readyPlayers?.length || 0}/${players.length})`;
+      
+      // HOST Text
+      if (isHost) return t('next_round'); 
+      
+      return t('ready_status'); // GUEST Text
+  };
 
     
 

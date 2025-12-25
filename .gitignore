@@ -87,3 +87,4 @@ yarn-error.*
 
 # Config (décommenter si vous voulez ignorer config.ts en production)
 # config.ts
+.aider*
