@@ -5,58 +5,14 @@ import { db } from '../services/FirebaseService';
 import { useAuth } from './AuthContext';
 import UserService from '../services/UserService';
 import MusicService from '../services/MusicService';
+import SocketService from '../services/SocketService';
 import { getBestImage, getRandomColor, getRandomEmoji } from '../utils/userUtils';
 import { GameTrack, PlayerScores, Player, SpotifyTrack } from '../types';
 
 const LAST_GAME_ID_KEY = 'last_active_game_id';
+// ... (Interfaces remain same)
 
-interface GameState {
-  currentRound: number;
-  playerScores: PlayerScores;
-  playedTracks: string[];
-  category: string;
-  gameId: number | null;
-  isGameActive: boolean;
-  userId?: string;
-  roomCode?: string;
-  hostId?: string;
-  players: Player[];
-  status: 'waiting' | 'READY' | 'playing' | 'revealing' | 'finished';
-  currentTrack?: GameTrack | null;
-  playlist?: GameTrack[]; // Verified sequence of tracks
-  trackPool: SpotifyTrack[];
-  votes: string[]; // Track who voted in the current round
-  readyPlayers: string[]; // Players who clicked "Next" in Reveal
-  setup: {
-    tracksPrepared: boolean;
-    preparedAt?: any;
-  };
-}
-
-interface GameContextType extends GameState {
-  startNewGame: (category: string) => void;
-  markSetupAsComplete: () => void;
-  returnToLobby: () => Promise<void>;
-  nextRound: () => void;
-  markPlayerReady: () => void;
-  updatePlayerScore: (playerId: string, score: number) => void;
-  registerVote: (playerId: string) => void;
-  addPlayedTrack: (trackId: string) => void;
-  setGameTrack: (track: GameTrack | null) => void;
-  setGamePlaylist: (playlist: GameTrack[]) => void;
-  setGameCategory: (category: string) => Promise<void>;
-  addToTrackPool: (tracks: SpotifyTrack[]) => Promise<void>;
-  addBot: () => Promise<void>;
-  resetGame: () => Promise<void>;
-  createGame: () => Promise<string>;
-  joinGame: (code: string) => Promise<boolean>;
-  tryRejoinLastGame: () => Promise<boolean>;
-  leaveGame: () => Promise<void>;
-  kickPlayer: (playerId: string) => Promise<void>;
-  startRoundAction: () => void; // New action to manually trigger "playing" status
-  isHost: boolean;
-  activeGameDocId: string | null;
-}
+// ...
 
 const getInitialGameState = (): GameState => ({
   currentRound: 1,
@@ -85,6 +41,20 @@ const GameContext = createContext<GameContextType | undefined>(undefined);
 export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [gameState, setGameState] = useState<GameState>(getInitialGameState());
   const { firebaseUser, isLoading: isAuthLoading, accessToken } = useAuth();
+  
+  // [MIGRATION] Connect Socket when Auth is ready
+  useEffect(() => {
+    if (!isAuthLoading && firebaseUser) {
+        // Envoi du token pour auth côté serveur (futur)
+        firebaseUser.getIdToken().then(token => {
+            SocketService.connect(token);
+        });
+    }
+    return () => {
+        SocketService.disconnect();
+    };
+  }, [isAuthLoading, firebaseUser]);
+
   const [activeGameDocId, setActiveGameDocId] = useState<string | null>(null);
   
   // Optimistic local storage for played tracks to avoid latency issues
@@ -380,15 +350,23 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // GUARD: If game is already finished, do NOT proceed
     if (gameState.status === 'finished') return;
 
-    // 1. D'abord on reset tout le monde en "Attente" pour éviter les faux départs
-    await performHostUpdate(`Launching Round ${gameState.currentRound + 1}`, {
-        status: 'waiting', // Tout le monde se met en pause
-        currentTrack: null, // On nettoie la musique précédente
-        "setup.tracksPrepared": false, // On signale qu'on cherche une nouvelle musique
-        currentRound: gameState.currentRound + 1, // We increment immediately
-        votes: [], 
-        readyPlayers: [], 
-    });
+    // [MIGRATION] : On utilise le Socket au lieu d'écrire directement
+    // Si le socket est connecté, on passe par lui. Sinon fallback Firestore (pour ne pas casser l'app tout de suite)
+    if (SocketService.socket?.connected) {
+        console.log("🚀 [GameContext] Using Socket for nextRound!");
+        SocketService.emit('nextRound', { gameId: activeGameDocId });
+    } else {
+        console.warn("⚠️ [GameContext] Socket disconnected. Falling back to Firestore (Insecure).");
+        // 1. D'abord on reset tout le monde en "Attente" pour éviter les faux départs
+        await performHostUpdate(`Launching Round ${gameState.currentRound + 1}`, {
+            status: 'waiting', // Tout le monde se met en pause
+            currentTrack: null, // On nettoie la musique précédente
+            "setup.tracksPrepared": false, // On signale qu'on cherche une nouvelle musique
+            currentRound: gameState.currentRound + 1, // We increment immediately
+            votes: [], 
+            readyPlayers: [], 
+        });
+    }
   };
 
   const startRoundAction = async () => {

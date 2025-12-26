@@ -114,7 +114,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
           <GlassCard style={styles.modalContent} intensity={40}>
             {/* Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>{t('my_profile')}</Text> {/* ✅ Translated */}
+              <Text style={styles.modalTitle}>{t('my_profile')}</Text>
               <TouchableOpacity onPress={onClose} style={styles.closeButton}>
                 <Ionicons name="close" size={24} color="white" />
               </TouchableOpacity>
@@ -147,14 +147,14 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
                 <PressableCard onPress={handleTakePhoto} style={styles.photoButton}>
                   <View style={styles.photoButtonContent}>
                     <Ionicons name="camera" size={20} color={COLORS.SPOTIFY_GREEN} />
-                    <Text style={styles.photoButtonText}>{t('camera')}</Text> {/* ✅ Translated */}
+                    <Text style={styles.photoButtonText}>{t('camera')}</Text>
                   </View>
                 </PressableCard>
                 
                 <PressableCard onPress={handlePickPhoto} style={styles.photoButton}>
                   <View style={styles.photoButtonContent}>
                     <Ionicons name="images" size={20} color={COLORS.SPOTIFY_GREEN} />
-                    <Text style={styles.photoButtonText}>{t('gallery')}</Text> {/* ✅ Translated */}
+                    <Text style={styles.photoButtonText}>{t('gallery')}</Text>
                   </View>
                 </PressableCard>
               </View>
@@ -162,14 +162,14 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
 
             {/* Input pseudo */}
             <View style={styles.usernameSection}>
-              <Text style={styles.label}>{t('identity_secret')}</Text> {/* ✅ Translated */}
+              <Text style={styles.label}>{t('identity_secret')}</Text>
               <View style={styles.inputContainer}>
                 <Ionicons name="person-outline" size={20} color={COLORS.SPOTIFY_GREEN} style={styles.inputIcon} />
                 <TextInput
                   style={styles.input}
                   value={username}
                   onChangeText={setUsername}
-                  placeholder={t('pseudo_placeholder')} // ✅ Translated
+                  placeholder={t('pseudo_placeholder')}
                   placeholderTextColor="#555"
                   maxLength={15}
                   autoCapitalize="none"
@@ -183,17 +183,17 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
                 <View style={styles.statCard}>
                     <Ionicons name="trophy" size={24} color="#FFD700" />
                     <Text style={styles.statValue}>--</Text>
-                    <Text style={styles.statLabel}>{t('wins')}</Text> {/* ✅ Translated */}
+                    <Text style={styles.statLabel}>{t('wins')}</Text>
                 </View>
                 <View style={styles.statCard}>
                     <Ionicons name="flame" size={24} color="#FF6B6B" />
                     <Text style={styles.statValue}>--</Text>
-                    <Text style={styles.statLabel}>{t('streak')}</Text> {/* ✅ Translated */}
+                    <Text style={styles.statLabel}>{t('streak')}</Text>
                 </View>
                 <View style={styles.statCard}>
                     <Ionicons name="musical-notes" size={24} color="#4ECDC4" />
                     <Text style={styles.statValue}>--</Text>
-                    <Text style={styles.statLabel}>{t('titles')}</Text> {/* ✅ Translated */}
+                    <Text style={styles.statLabel}>{t('titles')}</Text>
                 </View>
             </View>
 
@@ -207,7 +207,7 @@ export default function ProfileModal({ visible, onClose, currentUsername, curren
               >
                 <Ionicons name="checkmark-circle" size={24} color="white" />
                 <Text style={styles.saveButtonText}>
-                  {isLoading ? t('saving') : t('save')} {/* ✅ Translated */}
+                  {isLoading ? t('saving') : t('save')}
                 </Text>
               </LinearGradient>
             </PressableCard>

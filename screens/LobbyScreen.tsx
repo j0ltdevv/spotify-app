@@ -370,7 +370,7 @@ export default function LobbyScreen({ navigation, route }: LobbyScreenProps) {
                               <View style={styles.playerNameRow}>
                                 <Text style={styles.playerName}>{player.name}</Text>
                                 {player.id === setup?.hostId || players[0].id === player.id ? ( // Fallback check for host
-                                  <Ionicons name="crown" size={16} color={COLORS.GOLD} style={{ marginLeft: 6 }} />
+                                  <Ionicons name="trophy" size={16} color={COLORS.GOLD} style={{ marginLeft: 6 }} />
                                 ) : null}
                               </View>
                               <View style={styles.statusContainer}>

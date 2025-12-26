@@ -188,7 +188,7 @@ export const initializeGameSocket = (io: SocketIOServer): void => {
     });
 
     /**
-     * Next round
+     * Next round (Standard)
      */
     socket.on('next-round', async (data: { roomId: string }) => {
       try {
@@ -214,6 +214,17 @@ export const initializeGameSocket = (io: SocketIOServer): void => {
       } catch (error) {
         console.error('❌ Error moving to next round:', error);
       }
+    });
+
+    /**
+     * [MIGRATION POC] Next Round (Compatible Mobile App)
+     * Ecoute l'événement 'nextRound' envoyé par le GameContext actuel
+     */
+    socket.on('nextRound', (data: any) => {
+        console.log(`🔥 [SERVER] MIGRATION SUCCESS! Received 'nextRound' event from mobile!`, data);
+        
+        // Pour l'instant, on renvoie juste un accusé de réception pour prouver que ça marche
+        socket.emit('migration-success', { message: 'Server received your command!' });
     });
 
     /**
