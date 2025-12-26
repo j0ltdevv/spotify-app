@@ -16,7 +16,8 @@ export const SPOTIFY_CONFIG = {
 };
 
 export const DEEZER_CONFIG = {
-  CLIENT_ID: 'YOUR_DEEZER_APP_ID', // À remplacer par votre ID Deezer
+  // TODO: Replace with your actual Deezer App ID or use env variable like SPOTIFY_CLIENT_ID
+  CLIENT_ID: 'YOUR_DEEZER_APP_ID', 
   REDIRECT_SCHEME: 'trackroulette',
   SCOPES: ['basic_access', 'email', 'listening_history', 'manage_library'],
 };

@@ -53,6 +53,7 @@ interface GameContextType extends GameState {
   tryRejoinLastGame: () => Promise<boolean>;
   leaveGame: () => Promise<void>;
   kickPlayer: (playerId: string) => Promise<void>;
+  startRoundAction: () => void; // New action to manually trigger "playing" status
   isHost: boolean;
   activeGameDocId: string | null;
 }
@@ -122,12 +123,15 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           // 🛡️ Protection anti-rollback : ignorer les snapshots périmés (Round X -> Round X-1)
           // Sauf si c'est un reset de partie (gameId différent ou status 'waiting')
+          /* 
+          // [SECURITY FIX] Removed client-side rollback protection to allow server (Host) to correct state.
           if (firestoreState.gameId === gameState.gameId && 
               firestoreState.status !== 'waiting' &&
               firestoreState.currentRound < gameState.currentRound) {
              console.warn(`🔍 [CTX] 🛑 IGNORING STALE SNAPSHOT. Local Round: ${gameState.currentRound}, Received: ${firestoreState.currentRound}`);
              return;
           }
+          */
 
           // HOST LOGIC: Check if all players have voted (during playing)
           if (firestoreState.hostId === firebaseUser.uid && 
@@ -399,26 +403,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     console.log(`🔥 [GameContext] MASTER: Launching Round ${gameState.currentRound + 1}`);
 
     // 1. D'abord on reset tout le monde en "Attente" pour éviter les faux départs
+    // [ARCH FIX] Removed setTimeout race condition. 
+    // The Host's GameScreen will now detect 'waiting', prepare the track, 
+    // and THEN call startRoundAction() to switch to 'playing'.
     await updateDoc(doc(db, 'games', activeGameDocId), {
         status: 'waiting', // Tout le monde se met en pause
         currentTrack: null, // On nettoie la musique précédente
-        "setup.tracksPrepared": false // On signale qu'on cherche une nouvelle musique
+        "setup.tracksPrepared": false, // On signale qu'on cherche une nouvelle musique
+        currentRound: gameState.currentRound + 1, // We increment immediately so everyone knows where we are
+        votes: [], 
+        readyPlayers: [], 
     });
+  };
 
-    // 2. Ensuite on incrémente le round
-    if (gameState.currentRound >= (gameState.players.length * 2)) {
-       await updateDoc(doc(db, 'games', activeGameDocId), { status: 'finished' });
-    } else {
-       // Petit délai pour être sûr que le statut 'waiting' est passé partout
-       setTimeout(async () => {
-           await updateDoc(doc(db, 'games', activeGameDocId), { 
-               currentRound: gameState.currentRound + 1,
-               votes: [], 
-               readyPlayers: [], // Reset ready players
-               status: 'playing' // On relance le statut jeu (le GameScreen s'occupera du "Preparing")
-           });
-       }, 500);
-    }
+  const startRoundAction = async () => {
+    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log("🔥 [GameContext] MASTER: Starting the round (Switching to PLAYING).");
+    await updateDoc(doc(db, 'games', activeGameDocId), {
+        status: 'playing' 
+    });
   };
 
   const updatePlayerScore = (playerId: string, score: number) => {
@@ -526,6 +529,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     tryRejoinLastGame,
     leaveGame,
     kickPlayer,
+    startRoundAction,
     isHost: firebaseUser?.uid === gameState.hostId,
     activeGameDocId
   };

@@ -41,7 +41,8 @@ export default function GameScreen(props: {
     addPlayedTrack,
     playedTracks: contextPlayedTracks,
     activeGameDocId,
-    playlist
+    playlist,
+    startRoundAction
   } = useGame();
   
   const { firebaseUser } = useAuth();
@@ -235,8 +236,10 @@ export default function GameScreen(props: {
                 if (playlistTrack) {
                     console.log(`🎮 [GameScreen] Playlist Track: ${playlistTrack.title}`);
                     const trackWithRound = { ...playlistTrack, roundId: round };
-                    setGameTrack(trackWithRound);
+                    await setGameTrack(trackWithRound);
                     addPlayedTrack(playlistTrack.id);
+                    // [SYNC FIX] Explicitly start the round
+                    if (startRoundAction) startRoundAction();
                 } else {
                     console.error("🎮 [GameScreen] Playlist index error.");
                 }
@@ -255,8 +258,10 @@ export default function GameScreen(props: {
             const playableTrackResult = await MusicService.findPlayableTrack(trackPool, contextPlayedTracks);
 
             if (isActive && playableTrackResult.success && playableTrackResult.track) {
-              setGameTrack(playableTrackResult.track);
+              await setGameTrack(playableTrackResult.track); // Wait for track to be set
               addPlayedTrack(playableTrackResult.track.id);
+              // [SYNC FIX] Explicitly start the round now that data is ready
+              if (startRoundAction) startRoundAction();
             } else if (isActive) {
               console.warn("🎮 [GameScreen] No playable track found.");
               showToast(playableTrackResult.error || t('no_playable_track'), "error");
