@@ -280,22 +280,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     }
   };
 
-  const kickPlayer = async (playerId: string) => {
+  // 🛠️ Helper pour les actions de l'hôte (DRY & Sécurité)
+  const performHostUpdate = async (label: string, updates: any) => {
     if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
+    console.log(`🔥 [GameContext] MASTER: ${label}`);
+    try {
+        await updateDoc(doc(db, 'games', activeGameDocId), updates);
+    } catch(e) {
+        console.error(`Error in ${label}:`, e);
+    }
+  };
+
+  const kickPlayer = async (playerId: string) => {
     const playerToRemove = gameState.players.find(p => p.id === playerId);
     if (!playerToRemove) return;
 
-    console.log(`🔥 [GameContext] Kicking player: ${playerId}`);
-    try {
-        await updateDoc(doc(db, 'games', activeGameDocId), {
-            players: arrayRemove(playerToRemove),
-            // Remove traces to clean up
-            votes: arrayRemove(playerId),
-            readyPlayers: arrayRemove(playerId)
-        });
-    } catch(e) {
-        console.error("Error kicking player:", e);
-    }
+    await performHostUpdate(`Kicking player: ${playerId}`, {
+        players: arrayRemove(playerToRemove),
+        votes: arrayRemove(playerId),
+        readyPlayers: arrayRemove(playerId)
+    });
   };
 
   const leaveGame = async () => {
@@ -332,9 +336,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const markSetupAsComplete = () => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log("🔥 [GameContext] Marking setup as complete.");
-    updateDoc(doc(db, 'games', activeGameDocId), {
+    performHostUpdate("Marking setup as complete", {
       "setup.tracksPrepared": true,
       "setup.preparedAt": serverTimestamp(),
       status: 'READY'
@@ -342,18 +344,13 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const returnToLobby = async () => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log("🔥 [GameContext] Returning to lobby and resetting game data...");
-    
     MusicService.reset(); // Reset local music state
 
     // Reset all player scores to 0
     const resetScores: PlayerScores = {};
-    gameState.players.forEach(p => {
-        resetScores[p.id] = 0;
-    });
+    gameState.players.forEach(p => { resetScores[p.id] = 0; });
 
-    await updateDoc(doc(db, 'games', activeGameDocId), {
+    await performHostUpdate("Returning to lobby", {
       status: 'waiting', // Change to waiting to allow fresh track loading
       currentRound: 1,
       playerScores: resetScores,
@@ -368,9 +365,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const startNewGame = (category: string) => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log(`🔥 [GameContext] Starting new game. Category: ${category}`);
-    const updates = {
+    performHostUpdate(`Starting new game. Category: ${category}`, {
       category,
       status: 'playing',
       currentRound: 1,
@@ -378,50 +373,26 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       playedTracks: [], // Reset played tracks for new match
       votes: [], // Clear votes
       currentTrack: null // Reset shared track
-    };
-    updateDoc(doc(db, 'games', activeGameDocId), updates);
+    });
   };
 
   const nextRound = async () => {
-    console.log(`🔍 [CTX] 👉 nextRound CALLED! 
-    > IsHost: ${firebaseUser?.uid === gameState.hostId}
-    > ActiveDoc: ${activeGameDocId}
-    > CurrentStatus: ${gameState.status}
-    > CurrentRound: ${gameState.currentRound}`);
-
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) {
-        console.warn("🔍 [CTX] ❌ nextRound ABORTED: Not Host or No Active Game.");
-        return;
-    }
-    
     // GUARD: If game is already finished, do NOT proceed
-    if (gameState.status === 'finished') {
-        console.warn("🔍 [CTX] 🛑 nextRound ABORTED: Game is already finished.");
-        return;
-    }
-
-    console.log(`🔥 [GameContext] MASTER: Launching Round ${gameState.currentRound + 1}`);
+    if (gameState.status === 'finished') return;
 
     // 1. D'abord on reset tout le monde en "Attente" pour éviter les faux départs
-    // [ARCH FIX] Removed setTimeout race condition. 
-    // The Host's GameScreen will now detect 'waiting', prepare the track, 
-    // and THEN call startRoundAction() to switch to 'playing'.
-    await updateDoc(doc(db, 'games', activeGameDocId), {
+    await performHostUpdate(`Launching Round ${gameState.currentRound + 1}`, {
         status: 'waiting', // Tout le monde se met en pause
         currentTrack: null, // On nettoie la musique précédente
         "setup.tracksPrepared": false, // On signale qu'on cherche une nouvelle musique
-        currentRound: gameState.currentRound + 1, // We increment immediately so everyone knows where we are
+        currentRound: gameState.currentRound + 1, // We increment immediately
         votes: [], 
         readyPlayers: [], 
     });
   };
 
   const startRoundAction = async () => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log("🔥 [GameContext] MASTER: Starting the round (Switching to PLAYING).");
-    await updateDoc(doc(db, 'games', activeGameDocId), {
-        status: 'playing' 
-    });
+    await performHostUpdate("Starting the round (Switching to PLAYING)", { status: 'playing' });
   };
 
   const updatePlayerScore = (playerId: string, score: number) => {
@@ -438,36 +409,25 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addPlayedTrack = (trackId: string) => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    
     // Optimistic update
     setLocalPlayedTracks(prev => {
         const newSet = new Set(prev);
         newSet.add(trackId);
         return newSet;
     });
-    
-    updateDoc(doc(db, 'games', activeGameDocId), { playedTracks: arrayUnion(trackId) });
+    performHostUpdate(`Adding played track ${trackId}`, { playedTracks: arrayUnion(trackId) });
   };
 
   const setGameTrack = (track: any) => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log(`🔥 [GameContext] Setting shared game track: ${track?.title || 'NULL'}`);
-    updateDoc(doc(db, 'games', activeGameDocId), { currentTrack: track });
+    performHostUpdate(`Setting shared track: ${track?.title || 'NULL'}`, { currentTrack: track });
   };
 
   const setGamePlaylist = (playlist: GameTrack[]) => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log(`🔥 [GameContext] Setting shared game playlist: ${playlist.length} tracks`);
-    updateDoc(doc(db, 'games', activeGameDocId), { playlist });
+    performHostUpdate(`Setting playlist (${playlist.length} tracks)`, { playlist });
   };
 
   const setGameCategory = async (category: string) => {
-    if (firebaseUser?.uid !== gameState.hostId || !activeGameDocId) return;
-    console.log(`🔥 [GameContext] Updating game category to: ${category}`);
-    
-    // Changing category resets the pool and setup status to allow everyone to contribute new tracks
-    await updateDoc(doc(db, 'games', activeGameDocId), { 
+    await performHostUpdate(`Updating category: ${category}`, {
         category,
         trackPool: [], 
         "setup.tracksPrepared": false,
@@ -482,8 +442,8 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const addBot = async () => {
-    if (!activeGameDocId || firebaseUser?.uid !== gameState.hostId) return;
-    
+    if (!activeGameDocId) return; // Only check doc presence, host check is in performHostUpdate
+
     const botCount = gameState.players.filter(p => p.id.startsWith('bot-')).length;
     const newBot: Player = {
       id: `bot-${Date.now()}`, 
@@ -493,7 +453,7 @@ export const GameProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
     
     const cleanBot = JSON.parse(JSON.stringify(newBot));
-    await updateDoc(doc(db, 'games', activeGameDocId), {
+    await performHostUpdate("Adding Bot", {
         players: arrayUnion(cleanBot),
         [`playerScores.${newBot.id}`]: 0
     });
