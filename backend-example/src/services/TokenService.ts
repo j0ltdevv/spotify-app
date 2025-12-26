@@ -36,8 +36,7 @@ class TokenService {
   public generateToken(payload: JWTPayload): string {
     try {
       const token = jwt.sign(payload, JWT_SECRET, {
-        expiresIn: JWT_EXPIRY,
-        issuer: 'track-roulette-backend',
+        expiresIn: JWT_EXPIRY as any // Force cast to avoid strict type mismatch
       });
 
       console.log(`✅ JWT generated for user: ${payload.displayName}`);

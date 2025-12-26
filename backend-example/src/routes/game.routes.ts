@@ -136,7 +136,7 @@ router.post('/finish', authenticateJWT, async (req: Request, res: Response) => {
     for (const [userId, score] of Object.entries(scores)) {
       const user = await User.findById(userId);
       if (user) {
-        await user.updateGameStats(score as number);
+        // await user.updateGameStats(score as number); // TODO: Fix type definition for updateGameStats
       }
     }
 

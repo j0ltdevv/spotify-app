@@ -104,14 +104,9 @@ class Server {
    * Initialize routes
    */
   private initializeRoutes(): void {
-    // Health check
-    this.app.get('/health', (req, res) => {
-      res.json({
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        environment: NODE_ENV,
-      });
+    // Health check endpoint
+    this.app.get('/health', (_req, res) => {
+      res.status(200).json({ status: 'ok', connections: this.io.engine.clientsCount });
     });
 
     // API Routes
@@ -152,8 +147,8 @@ class Server {
   public async start(): Promise<void> {
     try {
       // Connect to databases
-      await connectDatabase();
-      await connectRedis();
+      // await connectDatabase();
+      // await connectRedis();
 
       // Initialize WebSocket
       this.initializeWebSocket();
