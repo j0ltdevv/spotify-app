@@ -19,6 +19,7 @@ import CircularTimer from '../components/CircularTimer';
 import GlassCard from '../components/GlassCard';
 import PressableCard from '../components/PressableCard';
 import Logger from '../utils/logger';
+import GameGrid from '../components/GameGrid';
 
 const { width } = Dimensions.get('window');
 
@@ -472,33 +473,6 @@ export default function GameScreen(props: {
     );
   }
 
-  // --- Dynamic Layout Calculation ---
-  const numPlayers = players.length;
-  let cardWidth = '45%';
-  let avatarSize = 100;
-  let nameSize = 16;
-  let gap = 16;
-
-  if (numPlayers <= 2) {
-    cardWidth = '80%';
-    avatarSize = 140;
-    nameSize = 20;
-  } else if (numPlayers <= 4) {
-    cardWidth = '45%';
-    avatarSize = 100;
-    nameSize = 16;
-  } else if (numPlayers <= 6) {
-    cardWidth = '45%';
-    avatarSize = 80;
-    nameSize = 14;
-    gap = 12;
-  } else {
-    cardWidth = '30%';
-    avatarSize = 60;
-    nameSize = 12;
-    gap = 8;
-  }
-
   return (
     <SafeContainer>
       <View style={styles.container}>
@@ -516,23 +490,11 @@ export default function GameScreen(props: {
           <Text style={styles.voteInstructionText}>{t('find_listener')}</Text>
         </View>
 
-        <View style={[styles.playersGrid, { gap }]}>
-          {players.map(p => (
-            <PressableCard key={p.id} style={{ width: cardWidth as any }} onPress={() => handleVoteAction(p.id)}>
-              <GlassCard style={[styles.playerVote, selectedPlayer === p.id && styles.playerVoteSelected]}>
-                  {!!p.image ? (
-                    <Image source={{ uri: p.image }} style={{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }} />
-                  ) : (
-                    <View style={[{ width: avatarSize, height: avatarSize, borderRadius: avatarSize / 2, marginBottom: 8 }, { backgroundColor: p.color || '#555', justifyContent: 'center', alignItems: 'center' }]}>
-                        <Text style={{ fontSize: avatarSize * 0.4 }}>{p.emoji || '👤'}</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.playerVoteName, { fontSize: nameSize }]} numberOfLines={1}>{p.name}</Text>
-                  {selectedPlayer === p.id ? (<View style={styles.checkmarkBadge}><Ionicons name="checkmark" size={avatarSize * 0.18} color="#fff" /></View>) : null}
-              </GlassCard>
-            </PressableCard>
-          ))}
-        </View>
+        <GameGrid 
+          players={players} 
+          selectedPlayer={selectedPlayer} 
+          onVote={handleVoteAction} 
+        />
       </View>
     </SafeContainer>
   );
@@ -576,11 +538,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  playersGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 'auto', paddingBottom: 20 },
-  playerVote: { padding: 8, alignItems: 'center', borderWidth: 3, borderColor: 'transparent', borderRadius: 20, width: '100%' },
-  playerVoteSelected: { borderColor: COLORS.SPOTIFY_GREEN },
-  playerVoteName: { color: 'white', fontWeight: '700', textAlign: 'center' },
-  checkmarkBadge: { position: 'absolute', top: 5, right: 5, width: 28, height: 28, borderRadius: 14, backgroundColor: COLORS.SPOTIFY_GREEN, justifyContent: 'center', alignItems: 'center' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 24 },
   loadingTitle: { fontSize: 24, fontWeight: '900', color: 'white', letterSpacing: 2 },
   loadingText: { fontSize: 18, fontWeight: '700', color: '#AAA' },
