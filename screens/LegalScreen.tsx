@@ -36,7 +36,7 @@ export default function LegalScreen({ navigation }: LegalScreenProps) {
         <Text style={styles.lastUpdate}>Dernière mise à jour : 20 Décembre 2025</Text>
 
         <Section title="1. À propos de l'application">
-          Who Listening est un jeu de quiz musical à but divertissant. L'application est développée par Julien Poitou et Eloic Cottier et n'a pas de but commercial direct.
+          Who Listening est un jeu de quiz musical à but divertissant. L'application est développée par une équipe indépendante et n'a pas de but commercial direct.
         </Section>
 
         <Section title="2. Utilisation des données (Confidentialité)">
@@ -63,7 +63,7 @@ export default function LegalScreen({ navigation }: LegalScreenProps) {
         </Section>
 
         <Section title="Contact">
-          Pour toute question légale ou technique, vous pouvez nous contacter à : julien234aa@gmail.com
+          Pour toute question légale ou technique, vous pouvez nous contacter via l'adresse e-mail indiquée sur la page GitHub du projet.
         </Section>
 
         <View style={styles.footer}>

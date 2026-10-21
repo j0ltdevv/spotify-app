@@ -1,178 +1,169 @@
 # 🎵 Who Listening
 
-Who Listening est un jeu multijoueur où tes amis doivent deviner quelles musiques **tu** écoutes. Connecte ton compte Spotify, choisis une catégorie (Top Récent, Guilty Pleasures, Vieux Favoris...), et laisse tes amis découvrir tes vrais goûts musicaux ! 📂
+**Who Listening** est un jeu multijoueur de quiz musical où tes amis doivent deviner quelles musiques **tu** écoutes vraiment. Connecte ton compte Spotify, choisis une catégorie (Top Récent, Guilty Pleasures, Vieux Favoris…), et laisse tes amis découvrir tes vrais goûts musicaux — parfois embarrassants. 😄
 
 ---
 
 ## ✨ Fonctionnalités
 
-- 🎧 **Connexion Spotify OAuth** : Authentification sécurisée avec ton compte Spotify
+- 🎧 **Connexion Spotify OAuth** : authentification sécurisée avec ton compte Spotify
 - 🎮 **Plusieurs catégories de jeu** :
-  - 🔥 **Top Récent** : Tes morceaux du moment
-  - 😳 **Guilty Pleasures** : Tes plaisirs coupables musicaux
-  - ⏰ **Vieux Favoris** : Les hits que tu n'écoutes plus
-  - 🎬 **Bandes Originales** : Musiques de films et séries
-  - 🎤 **Focus Artiste** : Devine ton artiste préféré
-- ⏱️ **Système de score** : Gagne des points en fonction de ta rapidité
-- 🎨 **Design moderne** : Interface inspirée de Spotify avec animations fluides
-- 📱 **Feedback haptique** : Vibrations pour une meilleure expérience
-- 💾 **Sauvegarde automatique** : Reprends ta partie où tu l'as laissée
-- ❤️ **Ajoute aux favoris** : Ajoute directement les morceaux à ta bibliothèque Spotify
+  - 🔥 **Top Récent** — tes morceaux du moment
+  - 😳 **Guilty Pleasures** — tes plaisirs coupables musicaux
+  - ⏰ **Vieux Favoris** — les hits que tu n'écoutes plus
+  - 🎬 **Bandes Originales** — musiques de films et séries
+  - 🎤 **Focus Artiste** — devine ton artiste préféré
+- ⏱️ **Système de score** : gagne des points selon ta rapidité
+- 🗳️ **Système de vote** : grille interactive pour sélectionner le « propriétaire » du morceau
+- 🤖 **Bots** : ajoute des bots pour jouer même à moins de joueurs
+- ⏰ **Timer robuste** : calcul du temps basé sur `Date.now()` pour éviter les désynchronisations
+- 🎨 **Design moderne** : interface inspirée de Spotify, style glassmorphism avec animations fluides
+- 📱 **Feedback haptique** : vibrations pour une meilleure expérience
+- 💾 **Sauvegarde automatique** : reprends ta partie où tu l'as laissée
+- ❤️ **Ajoute aux favoris** : ajoute directement les morceaux à ta bibliothèque Spotify
+- 🌍 **Multilingue** : français (par défaut) et anglais
+- 🔔 **Notifications push** : invitations de jeu (via Expo Push)
 
 ---
 
-## 🚀 Installation
+## 🛠️ Stack technique
 
-### Prérequis
-
-- Node.js (v14 ou supérieur)
-- npm ou yarn
-- Expo CLI (`npm install -g expo-cli`)
-- Un compte Spotify (gratuit ou premium)
-- Application Expo Go sur ton téléphone (iOS ou Android)
-
-### Étapes
-
-1. **Clone le projet**
-```bash
-git clone <url-du-repo>
-cd track-roulette
-```
-
-2. **Installe les dépendances**
-```bash
-npm install
-# ou
-yarn install
-```
-
-3. **Configure ton application Spotify**
-   - Va sur [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
-   - Crée une nouvelle application
-   - Ajoute `trackroulette://` dans les **Redirect URIs**
-   - Copie ton **Client ID**
-
-4. **Configure le Client ID**
-   - Ouvre `config.ts`
-   - Remplace le `CLIENT_ID` par le tien :
-   ```typescript
-   export const SPOTIFY_CONFIG = {
-     CLIENT_ID: 'TON_CLIENT_ID_ICI',
-     // ...
-   };
-   ```
-
-5. **Lance l'application**
-```bash
-npm start
-# ou
-expo start
-```
-
-6. **Scanne le QR code** avec Expo Go sur ton téléphone
-
----
-
-## 🎮 Comment jouer
-
-1. **Connexion** : Connecte-toi avec ton compte Spotify
-2. **Lobby** : Choisis une catégorie de musique
-3. **Jeu** : 
-   - Un extrait audio se joue pendant 30 secondes
-   - Les autres joueurs doivent deviner qui écoute ce morceau
-   - Plus tu réponds vite, plus tu gagnes de points !
-4. **Révélation** : Découvre le morceau et l'artiste
-5. **Résultats** : À la fin des 5 manches, vois le classement final !
+| Domaine | Technologies |
+|---|---|
+| **Mobile** | React Native, Expo SDK 54, TypeScript |
+| **Navigation** | React Navigation (native-stack) |
+| **Authentification** | Spotify OAuth (expo-auth-session), Firebase Auth |
+| **Realtime** | Firebase Firestore (sync des parties), WebSocket (backend) |
+| **Audio** | Expo AV (extraits 30 s), iTunes Search API (secours) |
+| **Animations** | React Native Animated API, Lottie |
+| **Stockage** | AsyncStorage (réglages & tokens) |
+| **Backend (exemple)** | Node.js, Express, Socket.IO, MongoDB, Redis, JWT |
 
 ---
 
 ## 📂 Structure du projet
 
 ```
-track-roulette/
-├── App.tsx                 # Point d'entrée principal
-├── config.ts              # Configuration Spotify (Client ID, etc.)
-├── constants.ts           # Constantes (couleurs, config jeu, etc.)
-├── types.ts               # Types TypeScript
+who-listening/
+├── App.tsx                  # Point d'entrée principal
+├── app.json                 # Configuration Expo
+├── config.ts                # Configuration Spotify / Deezer (client ID via @env)
+├── constants.ts             # Constantes (couleurs, config jeu, catégories…)
+├── types.ts                 # Types TypeScript partagés
 ├── contexts/
-│   ├── AuthContext.tsx    # Gestion authentification Spotify
-│   └── GameContext.tsx    # Gestion état du jeu
+│   ├── AuthContext.tsx      # Gestion authentification Spotify
+│   ├── GameContext.tsx      # Gestion état du jeu
+│   ├── SettingsContext.tsx  # Réglages utilisateur
+│   └── ToastContext.tsx     # Notifications in-app
 ├── screens/
-│   ├── WelcomeScreen.tsx  # Écran de connexion
-│   ├── LobbyScreen.tsx    # Sélection catégorie et joueurs
-│   ├── GameScreen.tsx     # Écran de jeu principal
-│   ├── RevealScreen.tsx   # Révélation du morceau
-│   └── GameOverScreen.tsx # Écran de fin avec résultats
-└── utils/
-    └── spotifyRefresh.ts  # Utilitaires gestion token
+│   ├── WelcomeScreen.tsx    # Connexion / choix de langue
+│   ├── MenuScreen.tsx       # Menu principal
+│   ├── LobbyScreen.tsx      # Création / rejoindre une partie
+│   ├── GameScreen.tsx       # Écran de jeu principal
+│   ├── RevealScreen.tsx     # Révélation du morceau
+│   ├── GameOverScreen.tsx   # Podium final
+│   ├── SettingsScreen.tsx   # Réglages
+│   └── LegalScreen.tsx      # Mentions légales
+├── components/              # Composants réutilisables (GlassCard, CircularTimer, Confetti…)
+├── services/
+│   ├── MusicService.ts      # Appels API Spotify
+│   ├── UserService.ts       # Profil utilisateur
+│   ├── FirebaseService.ts   # Interaction Firestore / Auth
+│   └── SocketService.ts     # Client WebSocket
+├── utils/                   # Helpers (spotifyHelper, spotifyRefresh, soundManager…)
+├── assets/                  # Images, logos
+├── firestore.rules          # Règles de sécurité Firestore
+└── backend-example/         # Backend de référence (Express + Socket.IO + JWT)
 ```
 
 ---
 
-## 🔧 Technologies utilisées
+## 🚀 Démarrage local
 
-- **React Native** : Framework mobile
-- **Expo** : Plateforme de développement
-- **TypeScript** : Typage statique
-- **React Navigation** : Navigation entre écrans
-- **Expo Auth Session** : Authentification OAuth Spotify
-- **Expo AV** : Lecture audio
-- **Expo Haptics** : Feedback haptique
-- **AsyncStorage** : Stockage local
-- **Spotify Web API** : Récupération des données musicales
-- **iTunes Search API** : Extraits audio de secours
+### Prérequis
+
+- Node.js (v18 ou supérieur)
+- npm ou yarn
+- Expo CLI (`npm install -g expo-cli`) ou l'application **Expo Go** sur ton téléphone
+- Un compte développeur [Spotify](https://developer.spotify.com/dashboard)
+
+### Étapes
+
+1. **Clone le projet**
+   ```bash
+   git clone https://github.com/j0ltdevv/spotify-app.git
+   cd spotify-app
+   ```
+
+2. **Installe les dépendances**
+   ```bash
+   npm install
+   ```
+
+3. **Configure ton application Spotify**
+   - Va sur le [Spotify Developer Dashboard](https://developer.spotify.com/dashboard)
+   - Crée une nouvelle application
+   - Ajoute `trackroulette://` dans les **Redirect URIs**
+   - Note ton **Client ID** (et ton **Client Secret** si tu utilises le backend)
+
+4. **Configure les variables d'environnement** (voir section suivante) — notamment `SPOTIFY_CLIENT_ID` dans un fichier `.env` à la racine.
+
+5. **Lance l'application**
+   ```bash
+   npm start
+   # ou
+   expo start
+   ```
+
+6. **Scanne le QR code** avec Expo Go sur ton téléphone
 
 ---
 
-## 🐛 Problèmes connus & Solutions
+## 🔐 Variables d'environnement
 
-### Le son ne se lance pas
-- Vérifie que ton téléphone n'est pas en mode silencieux
-- Assure-toi d'avoir autorisé les permissions audio
+Le projet utilise les variables suivantes via `@env` (fichier `.env` à la racine, non versionné). **Ne commite jamais de vraies valeurs.**
 
-### "Token expiré"
-- Les tokens Spotify expirent après 1 heure
-- Déconnecte-toi et reconnecte-toi depuis l'écran Welcome
+| Variable | Description |
+|---|---|
+| `SPOTIFY_CLIENT_ID` | Client ID de ton application Spotify |
+| `FIREBASE_API_KEY` | Clé API Firebase |
+| `FIREBASE_AUTH_DOMAIN` | Domaine d'authentification Firebase |
+| `FIREBASE_DATABASE_URL` | URL de la base Firestore |
+| `FIREBASE_PROJECT_ID` | ID du projet Firebase |
+| `FIREBASE_STORAGE_BUCKET` | Bucket de stockage Firebase |
+| `FIREBASE_MESSAGING_SENDER_ID` | Sender ID Firebase Cloud Messaging |
+| `FIREBASE_APP_ID` | App ID Firebase |
+| `FIREBASE_MEASUREMENT_ID` | ID de mesure Firebase Analytics |
 
-### Pas d'extrait audio trouvé
-- Certains morceaux n'ont pas de preview disponible
-- L'app va automatiquement chercher un autre morceau
-- Essaye une autre catégorie si le problème persiste
+Le dossier `backend-example/` dispose de son propre `.env.example` (JWT_SECRET, MONGODB_URI, REDIS_URL, SPOTIFY_CLIENT_SECRET…) pour démarrer le backend de référence.
 
 ---
 
-## 📝 Configuration avancée
+## 🎮 Comment jouer
 
-### Changer le nombre de manches
-Dans `constants.ts` :
-```typescript
-export const GAME_CONFIG = {
-  MAX_ROUNDS: 5, // Modifie ce nombre
-  // ...
-};
-```
+1. **Connexion** : connecte-toi avec ton compte Spotify
+2. **Lobby** : crée une partie (code à 4 chiffres) ou rejoins-en une
+3. **Jeu** :
+   - Un extrait audio de 30 secondes est joué
+   - Les joueurs doivent deviner **qui** écoute ce morceau
+   - Plus tu réponds vite, plus tu gagnes de points !
+4. **Révélation** : découvre le morceau et l'artiste
+5. **Résultats** : podium final en 3D après 5 à 10 manches
 
-### Ajouter des catégories personnalisées
-Dans `constants.ts`, ajoute une entrée dans `CATEGORIES` :
-```typescript
-{
-  key: 'MA_CATEGORIE',
-  label: 'Ma Catégorie',
-  icon: 'star',
-  description: 'Description',
-  gradient: ['#FF0000', '#00FF00'],
-  emoji: '🎵'
-}
-```
+---
 
-Puis implémente la logique dans `GameScreen.tsx` (fonction `startRound`).
+## ⚙️ Configuration avancée
+
+- **Nombre de manches** : modifie `GAME_CONFIG.MAX_ROUNDS` dans `constants.ts`
+- **Catégories personnalisées** : ajoute une entrée dans `CATEGORIES` (`constants.ts`), puis implémente la logique dans `GameScreen.tsx` (fonction `startRound`)
 
 ---
 
 ## 🤝 Contribution
 
 Les contributions sont les bienvenues ! N'hésite pas à :
-- Reporter des bugs
+
+- Reporter des bugs via les issues GitHub
 - Proposer de nouvelles fonctionnalités
 - Améliorer la documentation
 
@@ -180,13 +171,7 @@ Les contributions sont les bienvenues ! N'hésite pas à :
 
 ## 📄 Licence
 
-Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
-
----
-
-## 👨‍💻 Auteur
-
-Créé avec ❤️ pour les amateurs de musique et de jeux entre amis !
+Ce projet est sous licence **MIT** — voir le fichier [LICENSE](LICENSE).
 
 ---
 
@@ -196,12 +181,6 @@ Créé avec ❤️ pour les amateurs de musique et de jeux entre amis !
 - [iTunes Search API](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/)
 - [Expo](https://expo.dev/)
 - La communauté React Native
-
----
-
-## 📱 Captures d'écran
-
-_(À ajouter : screenshots de l'app)_
 
 ---
 
